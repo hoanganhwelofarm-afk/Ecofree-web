@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ecofree — Quản lý Dự án & Dòng tiền</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F6F7F3;
+    --surface:#FFFFFF;
+    --border:#E2E6DD;
+    --text:#1E2A22;
+    --text-soft:#5B6B5F;
+    --accent:#3F6C52;
+    --accent-hover:#325A43;
+    --accent-soft:#E7EFE8;
+    --warn:#B9791E;
+    --warn-soft:#FBF0DD;
+    --danger:#A8412F;
+    --danger-soft:#FBEAE6;
+    --ok:#2F7A4C;
+    --ok-soft:#E5F2E9;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--text);
+    display:flex; min-height:100vh;
+  }
+  aside{
+    width:230px; background:var(--surface); border-right:1px solid var(--border);
+    padding:24px 14px; position:sticky; top:0; height:100vh; flex-shrink:0;
+  }
+  .logo{ font-weight:700; font-size:20px; letter-spacing:-0.02em; padding:0 10px 22px; color:var(--accent);}
+  .logo span{ font-family:'IBM Plex Mono',monospace; font-weight:500; font-size:12px; color:var(--text-soft); display:block; letter-spacing:0.04em; text-transform:uppercase; margin-top:2px;}
+  nav button{
+    display:block; width:100%; text-align:left; background:none; border:none; padding:10px 12px;
+    border-radius:8px; font-size:14.5px; font-weight:500; color:var(--text-soft); cursor:pointer; margin-bottom:2px;
+  }
+  nav button:hover{ background:var(--accent-soft); color:var(--accent);}
+  nav button.active{ background:var(--accent); color:#fff;}
+  main{ flex:1; padding:32px 40px; max-width:1100px;}
+  h1{ font-size:22px; margin:0 0 4px;}
+  .subtitle{ color:var(--text-soft); font-size:14px; margin-bottom:24px;}
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px;}
+  .card h2{ font-size:15px; margin:0 0 14px; font-weight:600;}
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px 16px; margin-bottom:14px;}
+  label{ display:block; font-size:12.5px; font-weight:500; color:var(--text-soft); margin-bottom:5px;}
+  input,select{
+    width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:7px; font-size:14px;
+    font-family:inherit; background:#fff; color:var(--text);
+  }
+  input:focus,select:focus{ outline:2px solid var(--accent); outline-offset:1px; border-color:var(--accent);}
+  .checkbox-row{ display:flex; align-items:center; gap:8px; margin-top:4px;}
+  .checkbox-row input{ width:auto;}
+  button.primary{
+    background:var(--accent); color:#fff; border:none; padding:9px 16px; border-radius:7px;
+    font-size:14px; font-weight:600; cursor:pointer;
+  }
+  button.primary:hover{ background:var(--accent-hover);}
+  button.ghost{
+    background:none; border:1px solid var(--border); padding:6px 12px; border-radius:7px;
+    font-size:13px; cursor:pointer; color:var(--text);
+  }
+  button.ghost:hover{ background:var(--accent-soft); border-color:var(--accent);}
+  table{ width:100%; border-collapse:collapse; font-size:13.5px;}
+  th{ text-align:left; color:var(--text-soft); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:0.03em; padding:8px 10px; border-bottom:1px solid var(--border);}
+  td{ padding:10px; border-bottom:1px solid var(--border); vertical-align:middle;}
+  tr:last-child td{ border-bottom:none;}
+  .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:11.5px; font-weight:600;}
+  .badge.ok{ background:var(--ok-soft); color:var(--ok);}
+  .badge.warn{ background:var(--warn-soft); color:var(--warn);}
+  .badge.danger{ background:var(--danger-soft); color:var(--danger);}
+  .badge.muted{ background:var(--accent-soft); color:var(--accent);}
+  .empty{ color:var(--text-soft); font-size:13.5px; padding:16px 0;}
+  .actions-cell{ display:flex; gap:6px; flex-wrap:wrap;}
+  .toast{
+    position:fixed; bottom:20px; right:20px; background:var(--text); color:#fff; padding:10px 16px;
+    border-radius:8px; font-size:13.5px; opacity:0; transform:translateY(8px); transition:.25s; pointer-events:none;
+  }
+  .toast.show{ opacity:1; transform:translateY(0);}
+  .money{ font-family:'IBM Plex Mono',monospace; font-size:13px;}
+</style>
+</head>
+<body>
+
+<aside>
+  <div class="logo">Ecofree<span>Dự án &amp; dòng tiền</span></div>
+  <nav id="nav"></nav>
+</aside>
+
+<main>
+  <h1 id="page-title"></h1>
+  <div class="subtitle" id="page-subtitle"></div>
+  <div id="content"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TABS = [
+  { id:"tongquan", label:"Tổng quan" },
+  { id:"clients", label:"Khách hàng" },
+  { id:"staff", label:"Nhân viên" },
+  { id:"quotations", label:"Báo giá" },
+  { id:"orders", label:"Đơn hàng" },
+  { id:"invoices", label:"Hóa đơn" },
+  { id:"payouts", label:"Thù lao NV" },
+];
+const PAGE_SUBTITLE = {
+  tongquan: "Việc cần làm hôm nay",
+  clients: "Hồ sơ khách hàng & cấu hình phí chuyển tiền",
+  staff: "Hồ sơ nhân viên & tỷ lệ phí quản lý",
+  quotations: "Tạo báo giá, duyệt thành đơn hàng",
+  orders: "Đơn hàng đang chạy — Trọn gói / Theo giờ",
+  invoices: "Hóa đơn, hạn thanh toán & nhắc nợ ngày thứ 7",
+  payouts: "Tính & duyệt thù lao nhân viên",
+};
+
+let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [] };
+let currentTab = "tongquan";
+
+async function api(path, method = "GET", body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Có lỗi xảy ra");
+  return data;
+}
+
+function toast(msg, isError) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.background = isError ? "#A8412F" : "#1E2A22";
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2600);
+}
+
+function aud(cents) {
+  if (cents === null || cents === undefined) return "—";
+  return (cents / 100).toLocaleString("en-AU", { style: "currency", currency: "AUD" });
+}
+function toCents(audValue) {
+  const n = parseFloat(audValue);
+  return isNaN(n) ? 0 : Math.round(n * 100);
+}
+function fromCents(cents) {
+  if (cents === null || cents === undefined) return "";
+  return (cents / 100).toFixed(2);
+}
+function daysBetween(dateStr) {
+  if (!dateStr) return null;
+  const d1 = new Date(dateStr + "T00:00:00");
+  const d2 = new Date(new Date().toISOString().slice(0,10) + "T00:00:00");
+  return Math.round((d2 - d1) / 86400000);
+}
+function clientName(id) {
+  const c = cache.clients.find(x => x.client_id == id);
+  return c ? c.company_name : "—";
+}
+function staffName(id) {
+  const s = cache.staff.find(x => x.staff_id == id);
+  return s ? s.full_name : "—";
+}
+function orderLabel(id) {
+  const o = cache.orders.find(x => x.order_id == id);
+  if (!o) return "—";
+  return o.order_code + " (" + clientName(o.client_id) + ")";
+}
+
+async function loadAll() {
+  const [clients, staff, quotations, orders, invoices, payouts] = await Promise.all([
+    api("/api/clients"), api("/api/staff"), api("/api/quotations"),
+    api("/api/orders"), api("/api/invoices"), api("/api/payouts"),
+  ]);
+  cache = { clients, staff, quotations, orders, invoices, payouts };
+}
+
+function renderNav() {
+  const nav = document.getElementById("nav");
+  nav.innerHTML = "";
+  TABS.forEach(tab => {
+    const btn = document.createElement("button");
+    btn.textContent = tab.label;
+    btn.className = tab.id === currentTab ? "active" : "";
+    btn.onclick = () => { currentTab = tab.id; render(); };
+    nav.appendChild(btn);
+  });
+}
+
+async function render() {
+  renderNav();
+  document.getElementById("page-title").textContent = TABS.find(t => t.id === currentTab).label;
+  document.getElementById("page-subtitle").textContent = PAGE_SUBTITLE[currentTab];
+  const content = document.getElementById("content");
+  content.innerHTML = "<div class='empty'>Đang tải…</div>";
+  try {
+    await loadAll();
+    const renderers = {
+      tongquan: renderTongQuan, clients: renderClients, staff: renderStaff,
+      quotations: renderQuotations, orders: renderOrders, invoices: renderInvoices, payouts: renderPayouts,
+    };
+    content.innerHTML = "";
+    renderers[currentTab](content);
+  } catch (e) {
+    content.innerHTML = "<div class='card'><b>Không tải được dữ liệu.</b><br>" + e.message +
+      "<br><br>Kiểm tra lại: đã tạo D1 database, chạy schema.sql, và gắn D1 binding tên <code>DB</code> vào project Pages chưa?</div>";
+  }
+}
+
+// ---------- TỔNG QUAN ----------
+function renderTongQuan(root) {
+  const needReminder = cache.invoices.filter(i => {
+    if (i.status === "paid" || i.reminder_sent) return false;
+    const d = daysBetween(i.sent_date);
+    return d !== null && d >= 7;
+  });
+  const overdue = cache.invoices.filter(i => {
+    if (i.status === "paid") return false;
+    return i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10));
+  });
+
+  const card1 = document.createElement("div");
+  card1.className = "card";
+  card1.innerHTML = "<h2>🔔 Cần gửi nhắc nợ (đã 7 ngày kể từ ngày gửi hóa đơn)</h2>";
+  if (needReminder.length === 0) {
+    card1.innerHTML += "<div class='empty'>Không có hóa đơn nào cần nhắc hôm nay.</div>";
+  } else {
+    const tbl = buildInvoiceReminderTable(needReminder);
+    card1.appendChild(tbl);
+  }
+  root.appendChild(card1);
+
+  const card2 = document.createElement("div");
+  card2.className = "card";
+  card2.innerHTML = "<h2>⚠️ Hóa đơn đã quá hạn thanh toán</h2>";
+  if (overdue.length === 0) {
+    card2.innerHTML += "<div class='empty'>Không có hóa đơn quá hạn.</div>";
+  } else {
+    const rows = overdue.map(i => `<tr>
+      <td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
+      <td class="money">${aud(i.total_amount_cents)}</td>
+      <td>${i.due_date}</td>
+      <td><span class="badge danger">Quá hạn</span></td>
+    </tr>`).join("");
+    card2.innerHTML += `<table><thead><tr><th>Hóa đơn</th><th>Khách hàng</th><th>Tổng tiền</th><th>Hạn TT</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(card2);
+
+  const card3 = document.createElement("div");
+  card3.className = "card";
+  card3.innerHTML = "<h2>⏳ Thù lao đang chờ duyệt</h2>";
+  const pending = cache.payouts.filter(p => p.status === "pending_approval");
+  if (pending.length === 0) {
+    card3.innerHTML += "<div class='empty'>Không có khoản nào chờ duyệt.</div>";
+  } else {
+    const rows = pending.map(p => `<tr><td>${staffName(p.staff_id)}</td><td>${orderLabel(p.order_id)}</td><td class="money">${aud(p.net_amount_cents || p.gross_amount_cents)}</td></tr>`).join("");
+    card3.innerHTML += `<table><thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Số tiền</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(card3);
+}
+
+function buildInvoiceReminderTable(list) {
+  const wrap = document.createElement("table");
+  wrap.innerHTML = "<thead><tr><th>Hóa đơn</th><th>Khách hàng</th><th>Tổng tiền</th><th>Ngày gửi</th><th></th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  list.forEach(i => {
+    const tr = document.createElement("tr");
+    const client = cache.clients.find(c => c.client_id == i.client_id);
+    const mailLink = client && client.email
+      ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${client.email}?subject=Nhắc thanh toán hóa đơn ${i.invoice_code}&body=Kính gửi ${encodeURIComponent(client.company_name)}, hóa đơn ${i.invoice_code} đã gửi được 7 ngày, mong quý khách xác nhận đã nhận được và sắp xếp thanh toán." target="_blank">Soạn email nhắc</a>`
+      : "<span class='empty'>Khách chưa có email</span>";
+    tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
+      <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date}</td>
+      <td class="actions-cell">${mailLink}<button class="ghost" data-mark="${i.invoice_id}">Đánh dấu đã gửi nhắc</button></td>`;
+    tbody.appendChild(tr);
+  });
+  wrap.appendChild(tbody);
+  wrap.addEventListener("click", async (e) => {
+    const id = e.target.getAttribute("data-mark");
+    if (!id) return;
+    try {
+      await api("/api/invoices?id=" + id, "PUT", { reminder_sent: 1 });
+      toast("Đã đánh dấu gửi nhắc.");
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+  return wrap;
+}
+
+// ---------- KHÁCH HÀNG ----------
+function renderClients(root) {
+  root.appendChild(formCard("Thêm khách hàng mới", [
+    { key: "company_name", label: "Tên công ty / Nhà thầu", type: "text", required: true },
+    { key: "contact_person", label: "Người liên hệ", type: "text" },
+    { key: "email", label: "Email", type: "email" },
+    { key: "phone", label: "Số điện thoại", type: "text" },
+  ], async (data) => {
+    data.client_code = "KH-" + Date.now().toString().slice(-6);
+    data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
+    await api("/api/clients", "POST", data);
+    toast("Đã thêm khách hàng."); render();
+  }, [{ key: "client_pays_fee_default", label: "Khách hàng chịu phí chuyển tiền 5% (mặc định)" }]));
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Danh sách khách hàng</h2>";
+  if (cache.clients.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có khách hàng nào.</div>";
+  } else {
+    const rows = cache.clients.map(c => `<tr>
+      <td>${c.client_code}</td><td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
+      <td>${c.email || "—"}</td><td>${c.phone || "—"}</td>
+      <td>${c.client_pays_fee_default ? "<span class='badge muted'>Khách chịu phí</span>" : "<span class='badge muted'>Ecofree chịu phí</span>"}</td>
+    </tr>`).join("");
+    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Công ty</th><th>Người liên hệ</th><th>Email</th><th>Phone</th><th>Phí mặc định</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(card);
+}
+
+// ---------- NHÂN VIÊN ----------
+function renderStaff(root) {
+  root.appendChild(formCard("Thêm nhân viên mới", [
+    { key: "full_name", label: "Họ tên", type: "text", required: true },
+    { key: "role", label: "Vị trí", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"} },
+    { key: "avg_hourly_rate_aud", label: "Đơn giá TB/giờ (AUD)", type: "number", step: "0.01" },
+    { key: "management_fee_rate", label: "Tỷ lệ phí quản lý", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"} },
+    { key: "user_role", label: "Vai trò hệ thống", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Kế toán",manager:"Manager"} },
+  ], async (data) => {
+    data.staff_code = "NV-" + Date.now().toString().slice(-6);
+    data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
+    data.management_fee_rate = parseInt(data.management_fee_rate);
+    data.is_active = 1;
+    await api("/api/staff", "POST", data);
+    toast("Đã thêm nhân viên."); render();
+  }));
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Danh sách nhân viên</h2>";
+  if (cache.staff.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
+  } else {
+    const rows = cache.staff.map(s => `<tr>
+      <td>${s.staff_code}</td><td>${s.full_name}</td><td>${s.role}</td>
+      <td class="money">${aud(s.avg_hourly_rate_cents)}/giờ</td>
+      <td>${s.management_fee_rate}%</td><td>${s.user_role}</td>
+    </tr>`).join("");
+    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Họ tên</th><th>Vị trí</th><th>Đơn giá TB</th><th>Phí QL</th><th>Vai trò</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(card);
+}
+
+// ---------- BÁO GIÁ ----------
+function renderQuotations(root) {
+  if (cache.clients.length === 0) {
+    root.appendChild(warnCard("Bạn cần tạo ít nhất 1 Khách hàng trước khi tạo Báo giá."));
+  }
+  root.appendChild(formCard("Tạo báo giá mới", [
+    { key: "client_id", label: "Khách hàng", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true },
+    { key: "project_name", label: "Tên dự án", type: "text", required: true },
+    { key: "created_date", label: "Ngày tạo", type: "date", default: new Date().toISOString().slice(0,10) },
+    { key: "valid_until", label: "Hạn báo giá", type: "date" },
+    { key: "contract_type", label: "Hình thức hợp đồng", type: "select", options: ["fixed","hourly"], labels:{fixed:"Trọn gói (Fixed)",hourly:"Theo giờ (Hourly)"} },
+    { key: "fee_payer", label: "Ai chịu phí chuyển tiền", type: "select", options: ["","client","ecofree"], labels:{"":"(Mặc định theo Khách hàng)",client:"Khách hàng",ecofree:"Ecofree"} },
+    { key: "total_amount_aud", label: "Tổng giá trị báo giá (AUD)", type: "number", step:"0.01" },
+  ], async (data) => {
+    data.quotation_code = "BG-" + Date.now().toString().slice(-6);
+    data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
+    if (!data.fee_payer) delete data.fee_payer;
+    data.status = "sent";
+    await api("/api/quotations", "POST", data);
+    toast("Đã tạo báo giá."); render();
+  }));
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Danh sách báo giá</h2>";
+  if (cache.quotations.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có báo giá nào.</div>";
+  } else {
+    const tbl = document.createElement("table");
+    tbl.innerHTML = "<thead><tr><th>Mã</th><th>Khách hàng</th><th>Dự án</th><th>Hình thức</th><th>Giá trị</th><th>Trạng thái</th><th></th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    cache.quotations.forEach(q => {
+      const tr = document.createElement("tr");
+      const statusBadge = q.status === "approved" ? "<span class='badge ok'>Đã duyệt</span>" : "<span class='badge muted'>" + q.status + "</span>";
+      const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Duyệt → Đơn hàng</button>` : "—";
+      tr.innerHTML = `<td>${q.quotation_code}</td><td>${clientName(q.client_id)}</td><td>${q.project_name}</td>
+        <td>${q.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+        <td class="money">${aud(q.total_amount_cents)}</td><td>${statusBadge}</td>
+        <td>${approveBtn}</td>`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    tbl.addEventListener("click", async (e) => {
+      const id = e.target.getAttribute("data-approve");
+      if (!id) return;
+      try {
+        const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(id) });
+        toast("Đã tạo đơn hàng " + res.order_code);
+        render();
+      } catch (err) { toast(err.message, true); }
+    });
+    card.appendChild(tbl);
+  }
+  root.appendChild(card);
+}
+
+// ---------- ĐƠN HÀNG ----------
+function renderOrders(root) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Đơn hàng</h2>";
+  if (cache.orders.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có đơn hàng nào — duyệt 1 Báo giá để tạo đơn hàng.</div>";
+  } else {
+    const rows = cache.orders.map(o => `<tr>
+      <td>${o.order_code}</td><td>${clientName(o.client_id)}</td>
+      <td>${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+      <td>${o.start_date || "—"}</td><td>${o.deadline || "—"}</td>
+      <td><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
+    </tr>`).join("");
+    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(card);
+  root.appendChild(infoNote("Ghi chú: các bảng Task/Trả lương cố định theo nhân viên trong Đơn hàng (dữ liệu chi tiết theo giờ hoặc theo NV) đã có sẵn trong schema.sql — phiên bản giao diện này chưa có form riêng, có thể bổ sung ở bản sau nếu bạn cần."));
+}
+
+// ---------- HÓA ĐƠN ----------
+function renderInvoices(root) {
+  if (cache.orders.length === 0) {
+    root.appendChild(warnCard("Bạn cần có ít nhất 1 Đơn hàng trước khi tạo Hóa đơn."));
+  }
+  root.appendChild(formCard("Tạo hóa đơn mới", [
+    { key: "order_id", label: "Đơn hàng", type: "select", options: cache.orders.map(o=>o.order_id), labels: Object.fromEntries(cache.orders.map(o=>[o.order_id, o.order_code + " — " + clientName(o.client_id)])), required: true },
+    { key: "base_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01" },
+    { key: "transfer_fee_aud", label: "Phí chuyển tiền bổ sung (AUD)", type: "number", step:"0.01" },
+    { key: "sent_date", label: "Ngày gửi hóa đơn cho khách", type: "date", default: new Date().toISOString().slice(0,10) },
+    { key: "due_date", label: "Hạn thanh toán (theo hợp đồng)", type: "date" },
+  ], async (data) => {
+    const order = cache.orders.find(o => o.order_id == data.order_id);
+    data.invoice_code = "HD-" + Date.now().toString().slice(-6);
+    data.client_id = order.client_id;
+    data.base_amount_cents = toCents(data.base_amount_aud); delete data.base_amount_aud;
+    data.transfer_fee_cents = toCents(data.transfer_fee_aud); delete data.transfer_fee_aud;
+    data.total_amount_cents = data.base_amount_cents + data.transfer_fee_cents;
+    data.status = "sent_within_terms";
+    await api("/api/invoices", "POST", data);
+    toast("Đã tạo hóa đơn."); render();
+  }));
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Danh sách hóa đơn</h2>";
+  if (cache.invoices.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có hóa đơn nào.</div>";
+  } else {
+    const tbl = document.createElement("table");
+    tbl.innerHTML = "<thead><tr><th>Mã</th><th>Khách hàng</th><th>Tổng tiền</th><th>Ngày gửi</th><th>Hạn TT</th><th>Trạng thái</th><th></th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    cache.invoices.forEach(i => {
+      const tr = document.createElement("tr");
+      let statusBadge;
+      if (i.status === "paid") statusBadge = "<span class='badge ok'>Đã thu tiền</span>";
+      else if (i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10))) statusBadge = "<span class='badge danger'>Quá hạn</span>";
+      else statusBadge = "<span class='badge muted'>Trong hạn</span>";
+      const d = daysBetween(i.sent_date);
+      const remindBadge = (!i.reminder_sent && d !== null && d >= 7 && i.status !== "paid") ? " <span class='badge warn'>Cần nhắc nợ</span>" : "";
+      const payBtn = i.status !== "paid" ? `<button class="ghost" data-pay="${i.invoice_id}">Đánh dấu đã thu tiền</button>` : "—";
+      tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
+        <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date || "—"}</td><td>${i.due_date || "—"}</td>
+        <td>${statusBadge}${remindBadge}</td><td>${payBtn}</td>`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    tbl.addEventListener("click", async (e) => {
+      const id = e.target.getAttribute("data-pay");
+      if (!id) return;
+      try {
+        await api("/api/invoices?id=" + id, "PUT", { status: "paid", paid_date: new Date().toISOString().slice(0,10) });
+        toast("Đã đánh dấu đã thu tiền. Payout tương ứng sẽ tự sinh ở tab Thù lao NV.");
+        render();
+      } catch (err) { toast(err.message, true); }
+    });
+    card.appendChild(tbl);
+  }
+  root.appendChild(card);
+}
+
+// ---------- PAYOUT ----------
+function renderPayouts(root) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Thù lao nhân viên</h2>";
+  if (cache.payouts.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có khoản thù lao nào. Payout tự sinh khi Hóa đơn được đánh dấu 'Đã thu tiền'.</div>";
+  } else {
+    const tbl = document.createElement("table");
+    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Gốc</th><th>Phí QL</th><th>Thuế 7%</th><th>Thực nhận</th><th>Trạng thái</th><th></th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    cache.payouts.forEach(p => {
+      const tr = document.createElement("tr");
+      const statusBadge = p.status === "paid" ? "<span class='badge ok'>Đã chi</span>" : p.status === "approved" ? "<span class='badge muted'>Đã duyệt</span>" : "<span class='badge warn'>Chờ duyệt</span>";
+      let actions = "";
+      if (p.net_amount_cents === null || p.net_amount_cents === undefined || p.net_amount_cents === 0) {
+        actions += `<button class="ghost" data-calc="${p.payout_id}">Tính toán</button> `;
+      }
+      if (p.status === "pending_approval") actions += `<button class="primary" data-approve="${p.payout_id}">Duyệt</button> `;
+      if (p.status === "approved") actions += `<button class="ghost" data-pay="${p.payout_id}">Đánh dấu đã chi</button>`;
+      tr.innerHTML = `<td>${staffName(p.staff_id)}</td><td>${orderLabel(p.order_id)}</td>
+        <td class="money">${aud(p.gross_amount_cents)}</td>
+        <td class="money">${aud(p.management_fee_cents)}</td>
+        <td class="money">${aud(p.tax_withheld_cents)}</td>
+        <td class="money"><b>${aud(p.net_amount_cents)}</b></td>
+        <td>${statusBadge}</td><td class="actions-cell">${actions}</td>`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    tbl.addEventListener("click", async (e) => {
+      const calcId = e.target.getAttribute("data-calc");
+      const approveId = e.target.getAttribute("data-approve");
+      const payId = e.target.getAttribute("data-pay");
+      try {
+        if (calcId) { await api("/api/calc-payout", "POST", { payout_id: parseInt(calcId) }); toast("Đã tính xong, kiểm tra lại số liệu trước khi duyệt."); render(); }
+        if (approveId) { await api("/api/payouts?id=" + approveId, "PUT", { status: "approved" }); toast("Đã duyệt."); render(); }
+        if (payId) { await api("/api/payouts?id=" + payId, "PUT", { status: "paid", payout_date: new Date().toISOString().slice(0,10) }); toast("Đã đánh dấu chi trả."); render(); }
+      } catch (err) { toast(err.message, true); }
+    });
+    card.appendChild(tbl);
+  }
+  root.appendChild(card);
+  root.appendChild(infoNote("Số tiền hiển thị là gợi ý theo công thức đã thống nhất — bạn nên kiểm tra lại trước khi bấm Duyệt, vì đây là dữ liệu tài chính thật."));
+}
+
+// ---------- HELPERS: FORM & UI ----------
+function formCard(title, fields, onSubmit, extraCheckboxes) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>${title}</h2>`;
+  const form = document.createElement("form");
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  fields.forEach(f => {
+    const wrap = document.createElement("div");
+    let inputHtml;
+    if (f.type === "select") {
+      const opts = f.options.map(o => `<option value="${o}" ${f.default===o?"selected":""}>${(f.labels && f.labels[o]) || o}</option>`).join("");
+      inputHtml = `<select name="${f.key}" ${f.required?"required":""}>${opts}</select>`;
+    } else {
+      inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.required?"required":""} value="${f.default||""}">`;
+    }
+    wrap.innerHTML = `<label>${f.label}${f.required?" *":""}</label>${inputHtml}`;
+    grid.appendChild(wrap);
+  });
+  form.appendChild(grid);
+  if (extraCheckboxes) {
+    extraCheckboxes.forEach(cb => {
+      const row = document.createElement("div");
+      row.className = "checkbox-row";
+      row.innerHTML = `<input type="checkbox" name="${cb.key}" id="${cb.key}"><label for="${cb.key}" style="margin:0;">${cb.label}</label>`;
+      form.appendChild(row);
+    });
+  }
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit"; submitBtn.className = "primary"; submitBtn.textContent = "Lưu";
+  submitBtn.style.marginTop = "6px";
+  form.appendChild(submitBtn);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const data = {};
+    fields.forEach(f => { const v = fd.get(f.key); if (v !== null && v !== "") data[f.key] = v; });
+    if (extraCheckboxes) extraCheckboxes.forEach(cb => { data[cb.key] = fd.get(cb.key) ? 1 : 0; });
+    try { await onSubmit(data); form.reset(); }
+    catch (err) { toast(err.message, true); }
+  });
+  card.appendChild(form);
+  return card;
+}
+function warnCard(msg) {
+  const d = document.createElement("div");
+  d.className = "card";
+  d.style.borderColor = "var(--warn)";
+  d.innerHTML = `<span class="badge warn">Lưu ý</span> ${msg}`;
+  return d;
+}
+function infoNote(msg) {
+  const d = document.createElement("div");
+  d.style.color = "var(--text-soft)"; d.style.fontSize = "13px"; d.style.marginTop = "-8px";
+  d.textContent = msg;
+  return d;
+}
+
+render();
+</script>
+</body>
+</html>

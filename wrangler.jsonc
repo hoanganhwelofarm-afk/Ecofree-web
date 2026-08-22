@@ -1,0 +1,16 @@
+{
+  "name": "ecofree-web",
+  "compatibility_date": "2026-08-01",
+  "main": "src/worker.js",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ecofree-db",
+      "database_id": "b99ee555-1941-4038-b63b-5dda9300d9c2"
+    }
+  ]
+}
