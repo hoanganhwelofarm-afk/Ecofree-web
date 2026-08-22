@@ -39,6 +39,8 @@ async function handleApi(request, env, url) {
 
   if (resource === "approve-quotation" && request.method === "POST") return approveQuotation(request, env);
   if (resource === "calc-payout" && request.method === "POST") return calcPayout(request, env);
+  if (resource === "report" && request.method === "GET") return getReport(request, env, url);
+  if (resource === "close-billing-cycle" && request.method === "POST") return closeBillingCycle(request, env);
 
   const cfg = TABLES[resource];
   if (!cfg) return json({ error: "Bảng không hợp lệ: " + resource }, 400);
@@ -102,6 +104,77 @@ async function approveQuotation(request, env) {
   ).bind(order_code, q.quotation_id, q.client_id, q.contract_type, q.fee_payer).run();
   await env.DB.prepare("UPDATE quotations SET status = 'approved' WHERE quotation_id = ?").bind(quotation_id).run();
   return json({ success: true, order_id: res.meta.last_row_id, order_code });
+}
+
+async function closeBillingCycle(request, env) {
+  const { order_id, period_start, period_end } = await request.json();
+  if (!order_id || !period_start || !period_end) return json({ error: "Thiếu order_id/period_start/period_end" }, 400);
+
+  const { results: doneTasks } = await env.DB.prepare(
+    `SELECT * FROM tasks WHERE order_id = ? AND status = 'completed' AND billing_cycle_id IS NULL`
+  ).bind(order_id).all();
+
+  if (doneTasks.length === 0) return json({ error: "Không có Task nào đã hoàn thành và chưa được chốt kỳ trước đó" }, 400);
+
+  const totalClient = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.client_rate_cents), 0);
+  const totalStaff = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.staff_rate_cents), 0);
+
+  const res = await env.DB.prepare(
+    `INSERT INTO billing_cycles (order_id, period_start, period_end, total_client_amount_cents, total_staff_amount_cents, transfer_fee_cents)
+     VALUES (?, ?, ?, ?, ?, 0)`
+  ).bind(order_id, period_start, period_end, totalClient, totalStaff).run();
+
+  const cycleId = res.meta.last_row_id;
+  for (const t of doneTasks) {
+    await env.DB.prepare(`UPDATE tasks SET billing_cycle_id = ? WHERE task_id = ?`).bind(cycleId, t.task_id).run();
+  }
+
+  return json({ success: true, cycle_id: cycleId, total_client_amount_cents: totalClient, total_staff_amount_cents: totalStaff, task_count: doneTasks.length });
+}
+
+async function getReport(request, env, url) {
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  if (!from || !to) return json({ error: "Thiếu khoảng thời gian (from, to)" }, 400);
+
+  const revenue = await env.DB.prepare(
+    `SELECT COALESCE(SUM(total_amount_cents),0) AS v FROM invoices WHERE status = 'paid' AND paid_date BETWEEN ? AND ?`
+  ).bind(from, to).first();
+
+  const mgmtFee = await env.DB.prepare(
+    `SELECT COALESCE(SUM(p.management_fee_cents),0) AS v
+     FROM payouts p JOIN invoices i ON p.invoice_id = i.invoice_id
+     WHERE i.paid_date BETWEEN ? AND ?`
+  ).bind(from, to).first();
+
+  const staffPaid = await env.DB.prepare(
+    `SELECT COALESCE(SUM(net_amount_cents),0) AS v FROM payouts WHERE status = 'paid' AND payout_date BETWEEN ? AND ?`
+  ).bind(from, to).first();
+
+  const taxFund = await env.DB.prepare(
+    `SELECT COALESCE(SUM(p.tax_withheld_cents),0) AS v
+     FROM payouts p JOIN invoices i ON p.invoice_id = i.invoice_id
+     WHERE i.paid_date BETWEEN ? AND ?`
+  ).bind(from, to).first();
+
+  const badDebt = await env.DB.prepare(
+    `SELECT p.payout_id, p.net_amount_cents, p.order_id, s.full_name AS staff_name, o.order_code, c.company_name
+     FROM payouts p
+     JOIN staff s ON s.staff_id = p.staff_id
+     JOIN orders o ON o.order_id = p.order_id
+     JOIN clients c ON c.client_id = o.client_id
+     WHERE p.case_type = 'bad_debt'`
+  ).all();
+
+  return json({
+    from, to,
+    revenue_received_cents: revenue.v,
+    management_fee_cents: mgmtFee.v,
+    staff_paid_cents: staffPaid.v,
+    tax_fund_cents: taxFund.v,
+    net_cashflow_cents: revenue.v - staffPaid.v - taxFund.v,
+    bad_debt_list: badDebt.results
+  });
 }
 
 async function calcPayout(request, env) {
