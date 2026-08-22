@@ -124,6 +124,7 @@ const PAGE_SUBTITLE = {
 let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [], tasks: [], order_staff_payout: [], billing_cycles: [] };
 let currentTab = "tongquan";
 let selectedOrderId = null;
+let editingRecord = null; // { table: 'clients', id: 3 }
 
 async function api(path, method = "GET", body) {
   const res = await fetch(path, {
@@ -300,17 +301,25 @@ function buildInvoiceReminderTable(list) {
 
 // ---------- KHÁCH HÀNG ----------
 function renderClients(root) {
-  root.appendChild(formCard("Thêm khách hàng mới", [
-    { key: "company_name", label: "Tên công ty / Nhà thầu", type: "text", required: true },
-    { key: "contact_person", label: "Người liên hệ", type: "text" },
-    { key: "email", label: "Email", type: "email" },
-    { key: "phone", label: "Số điện thoại", type: "text" },
+  const editing = editingRecord && editingRecord.table === "clients" ? cache.clients.find(c => c.client_id === editingRecord.id) : null;
+  root.appendChild(formCard(editing ? "Sửa khách hàng: " + editing.company_name : "Thêm khách hàng mới", [
+    { key: "company_name", label: "Tên công ty / Nhà thầu", type: "text", required: true, default: editing?.company_name },
+    { key: "contact_person", label: "Người liên hệ", type: "text", default: editing?.contact_person },
+    { key: "email", label: "Email", type: "email", default: editing?.email },
+    { key: "phone", label: "Số điện thoại", type: "text", default: editing?.phone },
   ], async (data) => {
-    data.client_code = "KH-" + Date.now().toString().slice(-6);
-    data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
-    await api("/api/clients", "POST", data);
-    toast("Đã thêm khách hàng."); render();
-  }, [{ key: "client_pays_fee_default", label: "Khách hàng chịu phí chuyển tiền 5% (mặc định)" }]));
+    if (editing) {
+      data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
+      await api("/api/clients?id=" + editing.client_id, "PUT", data);
+      toast("Đã cập nhật khách hàng."); editingRecord = null; render();
+    } else {
+      data.client_code = "KH-" + Date.now().toString().slice(-6);
+      data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
+      await api("/api/clients", "POST", data);
+      toast("Đã thêm khách hàng."); render();
+    }
+  }, [{ key: "client_pays_fee_default", label: "Khách hàng chịu phí chuyển tiền 5% (mặc định)", checked: editing?.client_pays_fee_default }],
+  { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   const card = document.createElement("div");
   card.className = "card";
@@ -322,28 +331,44 @@ function renderClients(root) {
       <td>${c.client_code}</td><td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
       <td>${c.email || "—"}</td><td>${c.phone || "—"}</td>
       <td>${c.client_pays_fee_default ? "<span class='badge muted'>Khách chịu phí</span>" : "<span class='badge muted'>Ecofree chịu phí</span>"}</td>
+      <td><button class="ghost" data-edit="${c.client_id}">Sửa</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Công ty</th><th>Người liên hệ</th><th>Email</th><th>Phone</th><th>Phí mặc định</th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Công ty</th><th>Người liên hệ</th><th>Email</th><th>Phone</th><th>Phí mặc định</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
+  card.addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-edit");
+    if (!id) return;
+    editingRecord = { table: "clients", id: parseInt(id) };
+    render();
+  });
 }
 
 // ---------- NHÂN VIÊN ----------
 function renderStaff(root) {
-  root.appendChild(formCard("Thêm nhân viên mới", [
-    { key: "full_name", label: "Họ tên", type: "text", required: true },
-    { key: "role", label: "Vị trí", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"} },
-    { key: "avg_hourly_rate_aud", label: "Đơn giá TB/giờ (AUD)", type: "number", step: "0.01" },
-    { key: "management_fee_rate", label: "Tỷ lệ phí quản lý", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"} },
-    { key: "user_role", label: "Vai trò hệ thống", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Kế toán",manager:"Manager"} },
+  const editing = editingRecord && editingRecord.table === "staff" ? cache.staff.find(s => s.staff_id === editingRecord.id) : null;
+  root.appendChild(formCard(editing ? "Sửa nhân viên: " + editing.full_name : "Thêm nhân viên mới", [
+    { key: "full_name", label: "Họ tên", type: "text", required: true, default: editing?.full_name },
+    { key: "role", label: "Vị trí", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
+    { key: "avg_hourly_rate_aud", label: "Đơn giá TB/giờ (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
+    { key: "management_fee_rate", label: "Tỷ lệ phí quản lý", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"}, default: editing?.management_fee_rate },
+    { key: "user_role", label: "Vai trò hệ thống", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Kế toán",manager:"Manager"}, default: editing?.user_role },
   ], async (data) => {
-    data.staff_code = "NV-" + Date.now().toString().slice(-6);
-    data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
     data.management_fee_rate = parseInt(data.management_fee_rate);
-    data.is_active = 1;
-    await api("/api/staff", "POST", data);
-    toast("Đã thêm nhân viên."); render();
-  }));
+    if (editing) {
+      data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
+      data.is_active = data.is_active ? 1 : 0;
+      await api("/api/staff?id=" + editing.staff_id, "PUT", data);
+      toast("Đã cập nhật nhân viên."); editingRecord = null; render();
+    } else {
+      data.staff_code = "NV-" + Date.now().toString().slice(-6);
+      data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
+      data.is_active = 1;
+      await api("/api/staff", "POST", data);
+      toast("Đã thêm nhân viên."); render();
+    }
+  }, editing ? [{ key: "is_active", label: "Đang làm việc (bỏ tick nếu đã nghỉ)", checked: editing.is_active }] : null,
+  { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   const card = document.createElement("div");
   card.className = "card";
@@ -352,13 +377,20 @@ function renderStaff(root) {
     card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
   } else {
     const rows = cache.staff.map(s => `<tr>
-      <td>${s.staff_code}</td><td>${s.full_name}</td><td>${s.role}</td>
+      <td>${s.staff_code}</td><td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Đã nghỉ</span>"}</td><td>${s.role}</td>
       <td class="money">${aud(s.avg_hourly_rate_cents)}/giờ</td>
       <td>${s.management_fee_rate}%</td><td>${s.user_role}</td>
+      <td><button class="ghost" data-edit="${s.staff_id}">Sửa</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Họ tên</th><th>Vị trí</th><th>Đơn giá TB</th><th>Phí QL</th><th>Vai trò</th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Họ tên</th><th>Vị trí</th><th>Đơn giá TB</th><th>Phí QL</th><th>Vai trò</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
+  card.addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-edit");
+    if (!id) return;
+    editingRecord = { table: "staff", id: parseInt(id) };
+    render();
+  });
 }
 
 // ---------- BÁO GIÁ ----------
@@ -366,22 +398,31 @@ function renderQuotations(root) {
   if (cache.clients.length === 0) {
     root.appendChild(warnCard("Bạn cần tạo ít nhất 1 Khách hàng trước khi tạo Báo giá."));
   }
-  root.appendChild(formCard("Tạo báo giá mới", [
-    { key: "client_id", label: "Khách hàng", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true },
-    { key: "project_name", label: "Tên dự án", type: "text", required: true },
-    { key: "created_date", label: "Ngày tạo", type: "date", default: new Date().toISOString().slice(0,10) },
-    { key: "valid_until", label: "Hạn báo giá", type: "date" },
-    { key: "contract_type", label: "Hình thức hợp đồng", type: "select", options: ["fixed","hourly"], labels:{fixed:"Trọn gói (Fixed)",hourly:"Theo giờ (Hourly)"} },
-    { key: "fee_payer", label: "Ai chịu phí chuyển tiền", type: "select", options: ["","client","ecofree"], labels:{"":"(Mặc định theo Khách hàng)",client:"Khách hàng",ecofree:"Ecofree"} },
-    { key: "total_amount_aud", label: "Tổng giá trị báo giá (AUD)", type: "number", step:"0.01" },
+  const editing = editingRecord && editingRecord.table === "quotations" ? cache.quotations.find(q => q.quotation_id === editingRecord.id) : null;
+  if (editing && editing.status === "approved") {
+    root.appendChild(warnCard("Báo giá này đã được duyệt thành Đơn hàng — sửa ở đây sẽ KHÔNG tự cập nhật lại Đơn hàng đã tạo. Nếu cần sửa số liệu Đơn hàng, hãy sửa trực tiếp ở tab Đơn hàng."));
+  }
+  root.appendChild(formCard(editing ? "Sửa báo giá: " + editing.quotation_code : "Tạo báo giá mới", [
+    { key: "client_id", label: "Khách hàng", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true, default: editing?.client_id },
+    { key: "project_name", label: "Tên dự án", type: "text", required: true, default: editing?.project_name },
+    { key: "created_date", label: "Ngày tạo", type: "date", default: editing?.created_date || new Date().toISOString().slice(0,10) },
+    { key: "valid_until", label: "Hạn báo giá", type: "date", default: editing?.valid_until },
+    { key: "contract_type", label: "Hình thức hợp đồng", type: "select", options: ["fixed","hourly"], labels:{fixed:"Trọn gói (Fixed)",hourly:"Theo giờ (Hourly)"}, default: editing?.contract_type },
+    { key: "fee_payer", label: "Ai chịu phí chuyển tiền", type: "select", options: ["","client","ecofree"], labels:{"":"(Mặc định theo Khách hàng)",client:"Khách hàng",ecofree:"Ecofree"}, default: editing?.fee_payer },
+    { key: "total_amount_aud", label: "Tổng giá trị báo giá (AUD)", type: "number", step:"0.01", default: editing ? fromCents(editing.total_amount_cents) : undefined },
   ], async (data) => {
-    data.quotation_code = "BG-" + Date.now().toString().slice(-6);
     data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
     if (!data.fee_payer) delete data.fee_payer;
-    data.status = "sent";
-    await api("/api/quotations", "POST", data);
-    toast("Đã tạo báo giá."); render();
-  }));
+    if (editing) {
+      await api("/api/quotations?id=" + editing.quotation_id, "PUT", data);
+      toast("Đã cập nhật báo giá."); editingRecord = null; render();
+    } else {
+      data.quotation_code = "BG-" + Date.now().toString().slice(-6);
+      data.status = "sent";
+      await api("/api/quotations", "POST", data);
+      toast("Đã tạo báo giá."); render();
+    }
+  }, null, { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   const card = document.createElement("div");
   card.className = "card";
@@ -395,22 +436,25 @@ function renderQuotations(root) {
     cache.quotations.forEach(q => {
       const tr = document.createElement("tr");
       const statusBadge = q.status === "approved" ? "<span class='badge ok'>Đã duyệt</span>" : "<span class='badge muted'>" + q.status + "</span>";
-      const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Duyệt → Đơn hàng</button>` : "—";
+      const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Duyệt → Đơn hàng</button>` : "";
       tr.innerHTML = `<td>${q.quotation_code}</td><td>${clientName(q.client_id)}</td><td>${q.project_name}</td>
         <td>${q.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
         <td class="money">${aud(q.total_amount_cents)}</td><td>${statusBadge}</td>
-        <td>${approveBtn}</td>`;
+        <td class="actions-cell">${approveBtn}<button class="ghost" data-edit="${q.quotation_id}">Sửa</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
     tbl.addEventListener("click", async (e) => {
-      const id = e.target.getAttribute("data-approve");
-      if (!id) return;
-      try {
-        const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(id) });
-        toast("Đã tạo đơn hàng " + res.order_code);
-        render();
-      } catch (err) { toast(err.message, true); }
+      const approveId = e.target.getAttribute("data-approve");
+      const editId = e.target.getAttribute("data-edit");
+      if (approveId) {
+        try {
+          const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(approveId) });
+          toast("Đã tạo đơn hàng " + res.order_code);
+          render();
+        } catch (err) { toast(err.message, true); }
+      }
+      if (editId) { editingRecord = { table: "quotations", id: parseInt(editId) }; render(); }
     });
     card.appendChild(tbl);
   }
@@ -427,19 +471,22 @@ function renderOrders(root) {
     root.appendChild(card);
     return;
   }
-  const rows = cache.orders.map(o => `<tr data-select="${o.order_id}" style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}">
-    <td>${o.order_code}</td><td>${clientName(o.client_id)}</td>
-    <td>${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
-    <td>${o.start_date || "—"}</td><td>${o.deadline || "—"}</td>
-    <td><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
+  const rows = cache.orders.map(o => `<tr>
+    <td style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}" data-select="${o.order_id}">${o.order_code}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${clientName(o.client_id)}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${o.start_date || "—"}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${o.deadline || "—"}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;"><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
+    <td><button class="ghost" data-edit="${o.order_id}">Sửa</button></td>
   </tr>`).join("");
-  card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table>`;
+  card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   root.appendChild(card);
   card.querySelector("table").addEventListener("click", (e) => {
-    const tr = e.target.closest("tr[data-select]");
-    if (!tr) return;
-    selectedOrderId = parseInt(tr.getAttribute("data-select"));
-    render();
+    const editId = e.target.getAttribute("data-edit");
+    if (editId) { editingRecord = { table: "orders", id: parseInt(editId) }; selectedOrderId = parseInt(editId); render(); return; }
+    const selId = e.target.getAttribute("data-select");
+    if (selId) { selectedOrderId = parseInt(selId); render(); }
   });
 
   if (!selectedOrderId) {
@@ -452,6 +499,19 @@ function renderOrders(root) {
   const detailHeader = document.createElement("div");
   detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Chi tiết: ${order.order_code} — ${clientName(order.client_id)}</h1>`;
   root.appendChild(detailHeader);
+
+  const editingOrder = editingRecord && editingRecord.table === "orders" && editingRecord.id === order.order_id;
+  if (editingOrder) {
+    root.appendChild(formCard("Sửa thông tin đơn hàng", [
+      { key: "deadline", label: "Deadline bàn giao", type: "date", default: order.deadline },
+      { key: "estimated_hours", label: "Số giờ ước tính (dùng cho công thức nợ xấu)", type: "number", step:"0.25", default: order.estimated_hours },
+      { key: "rate_estimated", label: "Tỷ giá dự kiến (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
+      { key: "status", label: "Trạng thái", type: "select", options: ["in_progress","completed"], labels:{in_progress:"Đang chạy",completed:"Hoàn thành"}, default: order.status },
+    ], async (data) => {
+      await api("/api/orders?id=" + order.order_id, "PUT", data);
+      toast("Đã cập nhật đơn hàng."); editingRecord = null; render();
+    }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
+  }
 
   if (order.contract_type === "fixed") renderFixedOrderDetail(root, order);
   else renderHourlyOrderDetail(root, order);
@@ -761,9 +821,11 @@ async function renderReports(root) {
 }
 
 // ---------- HELPERS: FORM & UI ----------
-function formCard(title, fields, onSubmit, extraCheckboxes) {
+function formCard(title, fields, onSubmit, extraCheckboxes, options) {
+  options = options || {};
   const card = document.createElement("div");
   card.className = "card";
+  if (options.editing) card.style.borderColor = "var(--accent)";
   card.innerHTML = `<h2>${title}</h2>`;
   const form = document.createElement("form");
   const grid = document.createElement("div");
@@ -772,10 +834,10 @@ function formCard(title, fields, onSubmit, extraCheckboxes) {
     const wrap = document.createElement("div");
     let inputHtml;
     if (f.type === "select") {
-      const opts = f.options.map(o => `<option value="${o}" ${f.default===o?"selected":""}>${(f.labels && f.labels[o]) || o}</option>`).join("");
+      const opts = f.options.map(o => `<option value="${o}" ${String(f.default)===String(o)?"selected":""}>${(f.labels && f.labels[o]) || o}</option>`).join("");
       inputHtml = `<select name="${f.key}" ${f.required?"required":""}>${opts}</select>`;
     } else {
-      inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.required?"required":""} value="${f.default||""}">`;
+      inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.required?"required":""} value="${f.default!==undefined && f.default!==null?f.default:""}">`;
     }
     wrap.innerHTML = `<label>${f.label}${f.required?" *":""}</label>${inputHtml}`;
     grid.appendChild(wrap);
@@ -785,21 +847,29 @@ function formCard(title, fields, onSubmit, extraCheckboxes) {
     extraCheckboxes.forEach(cb => {
       const row = document.createElement("div");
       row.className = "checkbox-row";
-      row.innerHTML = `<input type="checkbox" name="${cb.key}" id="${cb.key}"><label for="${cb.key}" style="margin:0;">${cb.label}</label>`;
+      row.innerHTML = `<input type="checkbox" name="${cb.key}" id="${cb.key}" ${cb.checked?"checked":""}><label for="${cb.key}" style="margin:0;">${cb.label}</label>`;
       form.appendChild(row);
     });
   }
+  const btnRow = document.createElement("div");
+  btnRow.style.display = "flex"; btnRow.style.gap = "8px"; btnRow.style.marginTop = "6px";
   const submitBtn = document.createElement("button");
-  submitBtn.type = "submit"; submitBtn.className = "primary"; submitBtn.textContent = "Lưu";
-  submitBtn.style.marginTop = "6px";
-  form.appendChild(submitBtn);
+  submitBtn.type = "submit"; submitBtn.className = "primary"; submitBtn.textContent = options.submitLabel || "Lưu";
+  btnRow.appendChild(submitBtn);
+  if (options.onCancel) {
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button"; cancelBtn.className = "ghost"; cancelBtn.textContent = "Hủy";
+    cancelBtn.onclick = options.onCancel;
+    btnRow.appendChild(cancelBtn);
+  }
+  form.appendChild(btnRow);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
     const data = {};
     fields.forEach(f => { const v = fd.get(f.key); if (v !== null && v !== "") data[f.key] = v; });
     if (extraCheckboxes) extraCheckboxes.forEach(cb => { data[cb.key] = fd.get(cb.key) ? 1 : 0; });
-    try { await onSubmit(data); form.reset(); }
+    try { await onSubmit(data); if (!options.editing) form.reset(); }
     catch (err) { toast(err.message, true); }
   });
   card.appendChild(form);
