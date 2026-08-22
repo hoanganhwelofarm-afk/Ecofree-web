@@ -108,6 +108,7 @@ const TABS = [
   { id:"orders", label:"Đơn hàng" },
   { id:"invoices", label:"Hóa đơn" },
   { id:"payouts", label:"Thù lao NV" },
+  { id:"reports", label:"Báo cáo" },
 ];
 const PAGE_SUBTITLE = {
   tongquan: "Việc cần làm hôm nay",
@@ -117,10 +118,12 @@ const PAGE_SUBTITLE = {
   orders: "Đơn hàng đang chạy — Trọn gói / Theo giờ",
   invoices: "Hóa đơn, hạn thanh toán & nhắc nợ ngày thứ 7",
   payouts: "Tính & duyệt thù lao nhân viên",
+  reports: "Dòng tiền thực nhận & rủi ro nợ xấu",
 };
 
-let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [] };
+let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [], tasks: [], order_staff_payout: [], billing_cycles: [] };
 let currentTab = "tongquan";
+let selectedOrderId = null;
 
 async function api(path, method = "GET", body) {
   const res = await fetch(path, {
@@ -174,11 +177,12 @@ function orderLabel(id) {
 }
 
 async function loadAll() {
-  const [clients, staff, quotations, orders, invoices, payouts] = await Promise.all([
+  const [clients, staff, quotations, orders, invoices, payouts, tasks, order_staff_payout, billing_cycles] = await Promise.all([
     api("/api/clients"), api("/api/staff"), api("/api/quotations"),
     api("/api/orders"), api("/api/invoices"), api("/api/payouts"),
+    api("/api/tasks"), api("/api/order_staff_payout"), api("/api/billing_cycles"),
   ]);
-  cache = { clients, staff, quotations, orders, invoices, payouts };
+  cache = { clients, staff, quotations, orders, invoices, payouts, tasks, order_staff_payout, billing_cycles };
 }
 
 function renderNav() {
@@ -204,6 +208,7 @@ async function render() {
     const renderers = {
       tongquan: renderTongQuan, clients: renderClients, staff: renderStaff,
       quotations: renderQuotations, orders: renderOrders, invoices: renderInvoices, payouts: renderPayouts,
+      reports: renderReports,
     };
     content.innerHTML = "";
     renderers[currentTab](content);
@@ -419,17 +424,167 @@ function renderOrders(root) {
   card.innerHTML = "<h2>Đơn hàng</h2>";
   if (cache.orders.length === 0) {
     card.innerHTML += "<div class='empty'>Chưa có đơn hàng nào — duyệt 1 Báo giá để tạo đơn hàng.</div>";
+    root.appendChild(card);
+    return;
+  }
+  const rows = cache.orders.map(o => `<tr data-select="${o.order_id}" style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}">
+    <td>${o.order_code}</td><td>${clientName(o.client_id)}</td>
+    <td>${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+    <td>${o.start_date || "—"}</td><td>${o.deadline || "—"}</td>
+    <td><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
+  </tr>`).join("");
+  card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table>`;
+  root.appendChild(card);
+  card.querySelector("table").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-select]");
+    if (!tr) return;
+    selectedOrderId = parseInt(tr.getAttribute("data-select"));
+    render();
+  });
+
+  if (!selectedOrderId) {
+    root.appendChild(infoNote("👆 Bấm chọn 1 đơn hàng trong bảng trên để nhập chi tiết (giờ làm / tiền công từng nhân viên)."));
+    return;
+  }
+  const order = cache.orders.find(o => o.order_id === selectedOrderId);
+  if (!order) { selectedOrderId = null; return; }
+
+  const detailHeader = document.createElement("div");
+  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Chi tiết: ${order.order_code} — ${clientName(order.client_id)}</h1>`;
+  root.appendChild(detailHeader);
+
+  if (order.contract_type === "fixed") renderFixedOrderDetail(root, order);
+  else renderHourlyOrderDetail(root, order);
+}
+
+function renderFixedOrderDetail(root, order) {
+  root.appendChild(formCard("Thêm tiền công cố định cho 1 nhân viên", [
+    { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    { key: "fixed_amount_aud", label: "Tiền công cố định (AUD)", type: "number", step:"0.01", required: true },
+    { key: "delivered_date", label: "Ngày gửi kết quả", type: "date" },
+  ], async (data) => {
+    data.order_id = order.order_id;
+    data.fixed_amount_cents = toCents(data.fixed_amount_aud); delete data.fixed_amount_aud;
+    data.completed = 0;
+    await api("/api/order_staff_payout", "POST", data);
+    toast("Đã thêm."); render();
+  }));
+
+  const list = cache.order_staff_payout.filter(x => x.order_id === order.order_id);
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Danh sách nhân viên trong đơn này</h2>";
+  if (list.length === 0) {
+    card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
   } else {
-    const rows = cache.orders.map(o => `<tr>
-      <td>${o.order_code}</td><td>${clientName(o.client_id)}</td>
-      <td>${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
-      <td>${o.start_date || "—"}</td><td>${o.deadline || "—"}</td>
-      <td><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
-    </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const tbl = document.createElement("table");
+    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Tiền công</th><th>Ngày gửi</th><th>Hoàn thành</th><th></th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    list.forEach(x => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${staffName(x.staff_id)}</td><td class="money">${aud(x.fixed_amount_cents)}</td>
+        <td>${x.delivered_date || "—"}</td>
+        <td>${x.completed ? "<span class='badge ok'>Hoàn thành</span>" : "<span class='badge muted'>Đang làm</span>"}</td>
+        <td>${x.completed ? "—" : `<button class="ghost" data-done="${x.id}">Đánh dấu hoàn thành</button>`}</td>`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    tbl.addEventListener("click", async (e) => {
+      const id = e.target.getAttribute("data-done");
+      if (!id) return;
+      try { await api("/api/order_staff_payout?id=" + id, "PUT", { completed: 1 }); toast("Đã đánh dấu hoàn thành."); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+    card.appendChild(tbl);
   }
   root.appendChild(card);
-  root.appendChild(infoNote("Ghi chú: các bảng Task/Trả lương cố định theo nhân viên trong Đơn hàng (dữ liệu chi tiết theo giờ hoặc theo NV) đã có sẵn trong schema.sql — phiên bản giao diện này chưa có form riêng, có thể bổ sung ở bản sau nếu bạn cần."));
+  root.appendChild(infoNote("Khi đơn hàng có Hóa đơn 'Đã thu tiền', các dòng đã đánh dấu Hoàn thành ở đây sẽ tự sinh Thù lao NV."));
+}
+
+function renderHourlyOrderDetail(root, order) {
+  root.appendChild(formCard("Thêm nhiệm vụ (Task) mới", [
+    { key: "task_name", label: "Tên nhiệm vụ", type: "text", required: true },
+    { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    { key: "hours", label: "Số giờ làm việc", type: "number", step:"0.25" },
+    { key: "client_rate_aud", label: "Đơn giá charge Khách/giờ (AUD)", type: "number", step:"0.01" },
+    { key: "staff_rate_aud", label: "Đơn giá trả NV/giờ (AUD)", type: "number", step:"0.01" },
+  ], async (data) => {
+    data.order_id = order.order_id;
+    data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
+    data.staff_rate_cents = toCents(data.staff_rate_aud); delete data.staff_rate_aud;
+    data.status = "in_progress";
+    await api("/api/tasks", "POST", data);
+    toast("Đã thêm nhiệm vụ."); render();
+  }));
+
+  const tasks = cache.tasks.filter(t => t.order_id === order.order_id);
+  const taskCard = document.createElement("div");
+  taskCard.className = "card";
+  taskCard.innerHTML = "<h2>Danh sách nhiệm vụ</h2>";
+  if (tasks.length === 0) {
+    taskCard.innerHTML += "<div class='empty'>Chưa có nhiệm vụ nào.</div>";
+  } else {
+    const tbl = document.createElement("table");
+    tbl.innerHTML = "<thead><tr><th>Nhiệm vụ</th><th>Nhân viên</th><th>Giờ</th><th>Tiền thu Khách</th><th>Tiền trả NV</th><th>Trạng thái</th><th>Kỳ chốt</th><th></th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    tasks.forEach(t => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours}</td>
+        <td class="money">${aud(Math.round(t.hours*t.client_rate_cents))}</td>
+        <td class="money">${aud(Math.round(t.hours*t.staff_rate_cents))}</td>
+        <td>${t.status === "completed" ? "<span class='badge ok'>Hoàn thành</span>" : "<span class='badge muted'>Đang làm</span>"}</td>
+        <td>${t.billing_cycle_id ? "<span class='badge muted'>Đã chốt #"+t.billing_cycle_id+"</span>" : "—"}</td>
+        <td>${t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Đánh dấu hoàn thành</button>` : "—"}</td>`;
+      tbody.appendChild(tr);
+    });
+    tbl.appendChild(tbody);
+    tbl.addEventListener("click", async (e) => {
+      const id = e.target.getAttribute("data-donetask");
+      if (!id) return;
+      try { await api("/api/tasks?id=" + id, "PUT", { status: "completed" }); toast("Đã đánh dấu hoàn thành."); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+    taskCard.appendChild(tbl);
+  }
+  root.appendChild(taskCard);
+
+  const closeCard = document.createElement("div");
+  closeCard.className = "card";
+  closeCard.innerHTML = `<h2>Chốt kỳ Billing</h2>
+    <div class="grid">
+      <div><label>Từ ngày</label><input type="date" id="cycle-from"></div>
+      <div><label>Đến ngày</label><input type="date" id="cycle-to" value="${new Date().toISOString().slice(0,10)}"></div>
+    </div>
+    <button class="primary" id="close-cycle-btn">Chốt kỳ (gom Task đã Hoàn thành, chưa chốt)</button>`;
+  root.appendChild(closeCard);
+  closeCard.querySelector("#close-cycle-btn").addEventListener("click", async () => {
+    const period_start = document.getElementById("cycle-from").value;
+    const period_end = document.getElementById("cycle-to").value;
+    if (!period_start || !period_end) { toast("Chọn đủ khoảng thời gian.", true); return; }
+    try {
+      const res = await api("/api/close-billing-cycle", "POST", { order_id: order.order_id, period_start, period_end });
+      toast(`Đã chốt kỳ #${res.cycle_id} — ${res.task_count} task, thu Khách ${aud(res.total_client_amount_cents)}.`);
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+
+  const cycles = cache.billing_cycles.filter(c => c.order_id === order.order_id);
+  const cyclesCard = document.createElement("div");
+  cyclesCard.className = "card";
+  cyclesCard.innerHTML = "<h2>Lịch sử chốt kỳ</h2>";
+  if (cycles.length === 0) {
+    cyclesCard.innerHTML += "<div class='empty'>Chưa chốt kỳ nào.</div>";
+  } else {
+    const rows = cycles.map(c => `<tr>
+      <td>#${c.cycle_id}</td><td>${c.period_start} → ${c.period_end}</td>
+      <td class="money">${aud(c.total_client_amount_cents)}</td>
+      <td class="money">${aud(c.total_staff_amount_cents)}</td>
+      <td>${c.invoice_id ? "<span class='badge ok'>Đã có hóa đơn</span>" : "<span class='badge warn'>Chưa xuất hóa đơn</span>"}</td>
+    </tr>`).join("");
+    cyclesCard.innerHTML += `<table><thead><tr><th>Kỳ</th><th>Khoảng thời gian</th><th>Thu Khách</th><th>Trả NV</th><th>Hóa đơn</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  root.appendChild(cyclesCard);
+  root.appendChild(infoNote("Sau khi chốt kỳ, sang tab Hóa đơn để tạo hóa đơn thủ công dùng đúng số 'Thu Khách' ở trên làm Số tiền gốc."));
 }
 
 // ---------- HÓA ĐƠN ----------
@@ -536,6 +691,73 @@ function renderPayouts(root) {
   }
   root.appendChild(card);
   root.appendChild(infoNote("Số tiền hiển thị là gợi ý theo công thức đã thống nhất — bạn nên kiểm tra lại trước khi bấm Duyệt, vì đây là dữ liệu tài chính thật."));
+}
+
+// ---------- BÁO CÁO ----------
+function firstDayOfMonth() {
+  const d = new Date(); d.setDate(1);
+  return d.toISOString().slice(0,10);
+}
+async function renderReports(root) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = "<h2>Bộ lọc thời gian</h2>";
+  const filterRow = document.createElement("div");
+  filterRow.className = "grid";
+  filterRow.innerHTML = `
+    <div><label>Từ ngày</label><input type="date" id="rep-from" value="${firstDayOfMonth()}"></div>
+    <div><label>Đến ngày</label><input type="date" id="rep-to" value="${new Date().toISOString().slice(0,10)}"></div>
+  `;
+  card.appendChild(filterRow);
+  const btn = document.createElement("button");
+  btn.className = "primary"; btn.textContent = "Xem báo cáo";
+  card.appendChild(btn);
+  root.appendChild(card);
+
+  const resultZone = document.createElement("div");
+  root.appendChild(resultZone);
+
+  async function loadReport() {
+    const from = document.getElementById("rep-from").value;
+    const to = document.getElementById("rep-to").value;
+    resultZone.innerHTML = "<div class='empty'>Đang tính…</div>";
+    try {
+      const r = await api(`/api/report?from=${from}&to=${to}`);
+      resultZone.innerHTML = "";
+
+      const c1 = document.createElement("div");
+      c1.className = "card";
+      c1.innerHTML = `<h2>💰 Dòng tiền thực nhận (${from} → ${to})</h2>
+        <table>
+          <tbody>
+            <tr><td>Doanh thu thực nhận từ Khách hàng</td><td class="money">${aud(r.revenue_received_cents)}</td></tr>
+            <tr><td>Phí Quản lý Ecofree giữ lại</td><td class="money">${aud(r.management_fee_cents)}</td></tr>
+            <tr><td>Tổng chi phí thù lao đã trả Nhân viên</td><td class="money">${aud(r.staff_paid_cents)}</td></tr>
+            <tr><td>Quỹ Thuế 7% đã trích giữ (giữ hộ NV)</td><td class="money">${aud(r.tax_fund_cents)}</td></tr>
+            <tr><td><b>Dòng tiền ròng tích lũy của May</b></td><td class="money"><b>${aud(r.net_cashflow_cents)}</b></td></tr>
+          </tbody>
+        </table>`;
+      resultZone.appendChild(c1);
+
+      const c2 = document.createElement("div");
+      c2.className = "card";
+      c2.innerHTML = "<h2>⚠️ Rủi ro nợ xấu</h2>";
+      if (r.bad_debt_list.length === 0) {
+        c2.innerHTML += "<div class='empty'>Không có dự án nợ xấu nào.</div>";
+      } else {
+        const rows = r.bad_debt_list.map(b => `<tr>
+          <td>${b.order_code}</td><td>${b.company_name}</td><td>${b.staff_name}</td>
+          <td class="money">${aud(b.net_amount_cents)}</td>
+        </tr>`).join("");
+        c2.innerHTML += `<table><thead><tr><th>Đơn hàng</th><th>Khách hàng</th><th>Nhân viên hỗ trợ</th><th>Số tiền May đã hỗ trợ</th></tr></thead><tbody>${rows}</tbody></table>`;
+      }
+      resultZone.appendChild(c2);
+    } catch (err) {
+      resultZone.innerHTML = "<div class='card'>" + err.message + "</div>";
+    }
+  }
+  btn.addEventListener("click", loadReport);
+  loadReport();
 }
 
 // ---------- HELPERS: FORM & UI ----------
