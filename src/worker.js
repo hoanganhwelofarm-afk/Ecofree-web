@@ -5,8 +5,8 @@
 const TABLES = {
   clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","client_pays_fee_default"] },
   staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","user_role","is_active"] },
-  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","total_amount_cents","status"] },
-  orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","contract_type","fee_payer","start_date","deadline","estimated_hours","rate_estimated","status"] },
+  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","total_amount_cents","notes","status"] },
+  orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","project_name","contract_type","fee_payer","start_date","deadline","estimated_hours","rate_estimated","total_amount_cents","notes","status"] },
   order_staff_payout: { pk: "id", columns: ["order_id","staff_id","fixed_amount_cents","delivered_date","completed"] },
   tasks: { pk: "task_id", columns: ["order_id","task_name","staff_id","hours","client_rate_cents","staff_rate_cents","status","billing_cycle_id"] },
   billing_cycles: { pk: "cycle_id", columns: ["order_id","period_start","period_end","total_client_amount_cents","total_staff_amount_cents","transfer_fee_cents","invoice_id"] },
@@ -41,6 +41,8 @@ async function handleApi(request, env, url) {
   if (resource === "calc-payout" && request.method === "POST") return calcPayout(request, env);
   if (resource === "report" && request.method === "GET") return getReport(request, env, url);
   if (resource === "close-billing-cycle" && request.method === "POST") return closeBillingCycle(request, env);
+  if (resource === "check-fixed-order-invoice" && request.method === "POST") return checkFixedOrderInvoice(request, env);
+  if (resource === "invoice-detail" && request.method === "GET") return getInvoiceDetail(request, env, url);
 
   const cfg = TABLES[resource];
   if (!cfg) return json({ error: "Bảng không hợp lệ: " + resource }, 400);
@@ -99,9 +101,9 @@ async function approveQuotation(request, env) {
   if (!q) return json({ error: "Không tìm thấy báo giá" }, 404);
   if (q.status === "approved") return json({ error: "Báo giá này đã được duyệt trước đó" }, 400);
   const res = await env.DB.prepare(
-    `INSERT INTO orders (order_code, quotation_id, client_id, contract_type, fee_payer, start_date, rate_estimated, status)
-     VALUES (?, ?, ?, ?, ?, date('now'), 1, 'in_progress')`
-  ).bind(order_code, q.quotation_id, q.client_id, q.contract_type, q.fee_payer).run();
+    `INSERT INTO orders (order_code, quotation_id, client_id, project_name, contract_type, fee_payer, start_date, rate_estimated, total_amount_cents, notes, status)
+     VALUES (?, ?, ?, ?, ?, ?, date('now'), 1, ?, ?, 'in_progress')`
+  ).bind(order_code, q.quotation_id, q.client_id, q.project_name, q.contract_type, q.fee_payer, q.total_amount_cents, q.notes).run();
   await env.DB.prepare("UPDATE quotations SET status = 'approved' WHERE quotation_id = ?").bind(quotation_id).run();
   return json({ success: true, order_id: res.meta.last_row_id, order_code });
 }
@@ -109,6 +111,9 @@ async function approveQuotation(request, env) {
 async function closeBillingCycle(request, env) {
   const { order_id, period_start, period_end } = await request.json();
   if (!order_id || !period_start || !period_end) return json({ error: "Thiếu order_id/period_start/period_end" }, 400);
+
+  const order = await env.DB.prepare("SELECT * FROM orders WHERE order_id = ?").bind(order_id).first();
+  if (!order) return json({ error: "Không tìm thấy đơn hàng" }, 404);
 
   const { results: doneTasks } = await env.DB.prepare(
     `SELECT * FROM tasks WHERE order_id = ? AND status = 'completed' AND billing_cycle_id IS NULL`
@@ -118,18 +123,96 @@ async function closeBillingCycle(request, env) {
 
   const totalClient = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.client_rate_cents), 0);
   const totalStaff = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.staff_rate_cents), 0);
+  const transferFee = order.fee_payer === "client" ? Math.round(totalClient * 0.05) : 0;
 
   const res = await env.DB.prepare(
     `INSERT INTO billing_cycles (order_id, period_start, period_end, total_client_amount_cents, total_staff_amount_cents, transfer_fee_cents)
-     VALUES (?, ?, ?, ?, ?, 0)`
-  ).bind(order_id, period_start, period_end, totalClient, totalStaff).run();
-
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(order_id, period_start, period_end, totalClient, totalStaff, transferFee).run();
   const cycleId = res.meta.last_row_id;
+
   for (const t of doneTasks) {
     await env.DB.prepare(`UPDATE tasks SET billing_cycle_id = ? WHERE task_id = ?`).bind(cycleId, t.task_id).run();
   }
 
-  return json({ success: true, cycle_id: cycleId, total_client_amount_cents: totalClient, total_staff_amount_cents: totalStaff, task_count: doneTasks.length });
+  // Tự động tạo Hóa đơn NHÁP (chưa gửi) gắn với kỳ chốt này
+  const invoice_code = "HD-NHAP-" + cycleId;
+  const invRes = await env.DB.prepare(
+    `INSERT INTO invoices (invoice_code, order_id, client_id, base_amount_cents, transfer_fee_cents, total_amount_cents, status)
+     VALUES (?, ?, ?, ?, ?, ?, 'delivered_pending')`
+  ).bind(invoice_code, order_id, order.client_id, totalClient, transferFee, totalClient + transferFee).run();
+  const invoiceId = invRes.meta.last_row_id;
+
+  await env.DB.prepare(`UPDATE billing_cycles SET invoice_id = ? WHERE cycle_id = ?`).bind(invoiceId, cycleId).run();
+
+  return json({
+    success: true, cycle_id: cycleId, total_client_amount_cents: totalClient,
+    total_staff_amount_cents: totalStaff, task_count: doneTasks.length,
+    invoice_id: invoiceId, invoice_code
+  });
+}
+
+async function checkFixedOrderInvoice(request, env) {
+  const { order_id } = await request.json();
+  if (!order_id) return json({ error: "Thiếu order_id" }, 400);
+
+  const order = await env.DB.prepare("SELECT * FROM orders WHERE order_id = ?").bind(order_id).first();
+  if (!order || order.contract_type !== "fixed") return json({ created: false });
+
+  const existing = await env.DB.prepare("SELECT invoice_id FROM invoices WHERE order_id = ? LIMIT 1").bind(order_id).first();
+  if (existing) return json({ created: false, reason: "Đơn hàng này đã có hóa đơn" });
+
+  const { results: staffRows } = await env.DB.prepare(
+    `SELECT * FROM order_staff_payout WHERE order_id = ?`
+  ).bind(order_id).all();
+  if (staffRows.length === 0) return json({ created: false, reason: "Chưa có nhân viên nào trong đơn hàng" });
+  const allDone = staffRows.every((r) => r.completed === 1);
+  if (!allDone) return json({ created: false, reason: "Còn nhân viên chưa hoàn thành" });
+
+  const baseAmount = order.total_amount_cents || 0;
+  const transferFee = order.fee_payer === "client" ? Math.round(baseAmount * 0.05) : 0;
+  const invoice_code = "HD-NHAP-DH" + order_id;
+
+  const invRes = await env.DB.prepare(
+    `INSERT INTO invoices (invoice_code, order_id, client_id, base_amount_cents, transfer_fee_cents, total_amount_cents, status)
+     VALUES (?, ?, ?, ?, ?, ?, 'delivered_pending')`
+  ).bind(invoice_code, order_id, order.client_id, baseAmount, transferFee, baseAmount + transferFee).run();
+
+  return json({ created: true, invoice_id: invRes.meta.last_row_id, invoice_code });
+}
+
+async function getInvoiceDetail(request, env, url) {
+  const id = url.searchParams.get("id");
+  if (!id) return json({ error: "Thiếu id" }, 400);
+
+  const invoice = await env.DB.prepare("SELECT * FROM invoices WHERE invoice_id = ?").bind(id).first();
+  if (!invoice) return json({ error: "Không tìm thấy hóa đơn" }, 404);
+
+  const client = await env.DB.prepare("SELECT company_name, email FROM clients WHERE client_id = ?").bind(invoice.client_id).first();
+  const order = await env.DB.prepare("SELECT * FROM orders WHERE order_id = ?").bind(invoice.order_id).first();
+
+  let lineItems = [];
+  if (order && order.contract_type === "hourly") {
+    const cycle = await env.DB.prepare("SELECT cycle_id FROM billing_cycles WHERE invoice_id = ?").bind(invoice.invoice_id).first();
+    if (cycle) {
+      const { results: tasks } = await env.DB.prepare(
+        `SELECT t.task_name, t.hours, t.client_rate_cents, s.full_name AS staff_name
+         FROM tasks t JOIN staff s ON s.staff_id = t.staff_id
+         WHERE t.billing_cycle_id = ?`
+      ).bind(cycle.cycle_id).all();
+      lineItems = tasks.map((t) => ({
+        task_name: t.task_name, staff_name: t.staff_name, hours: t.hours,
+        rate_cents: t.client_rate_cents, amount_cents: Math.round(t.hours * t.client_rate_cents)
+      }));
+    }
+  } else if (order) {
+    lineItems = [{ task_name: "Trọn gói dự án: " + (order.project_name || ""), staff_name: "", hours: null, rate_cents: null, amount_cents: invoice.base_amount_cents }];
+  }
+
+  return json({
+    invoice, client_name: client?.company_name, client_email: client?.email,
+    project_name: order?.project_name, contract_type: order?.contract_type, line_items: lineItems
+  });
 }
 
 async function getReport(request, env, url) {
