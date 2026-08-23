@@ -213,6 +213,10 @@ function fromCents(cents) {
   if (cents === null || cents === undefined) return "";
   return (cents / 100).toFixed(2);
 }
+function formatVND(vnd) {
+  if (vnd === null || vnd === undefined || isNaN(vnd)) return "—";
+  return Math.round(vnd).toLocaleString("vi-VN") + " ₫";
+}
 function daysBetween(dateStr) {
   if (!dateStr) return null;
   const d1 = new Date(dateStr + "T00:00:00");
@@ -851,7 +855,7 @@ function renderPayouts(root) {
   const editing = editingRecord && editingRecord.table === "payouts" ? cache.payouts.find(p => p.payout_id === editingRecord.id) : null;
   if (editing) {
     root.appendChild(warnCard(`Đang sửa Thù lao của <b>${staffName(editing.staff_id)}</b> — Đơn hàng ${orderLabel(editing.order_id)}. Chỉnh sửa số tiền tại đây sẽ GHI ĐÈ số tự tính, hãy kiểm tra kỹ trước khi Cập nhật.`));
-    root.appendChild(formCard("Sửa thù lao nhân viên", [
+    const editCard = formCard("Sửa thù lao nhân viên", [
       { key: "gross_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01", default: fromCents(editing.gross_amount_cents) },
       { key: "management_fee_aud", label: "Phí quản lý (AUD)", type: "number", step:"0.01", default: fromCents(editing.management_fee_cents) },
       { key: "tax_withheld_aud", label: "Thuế giữ 7% (AUD)", type: "number", step:"0.01", default: fromCents(editing.tax_withheld_cents) },
@@ -868,7 +872,25 @@ function renderPayouts(root) {
       if (data.rate_payout) data.net_amount_vnd = Math.round((data.net_amount_cents / 100) * parseFloat(data.rate_payout));
       await api("/api/payouts?id=" + editing.payout_id, "PUT", data);
       toast("Đã cập nhật thù lao."); editingRecord = null; render();
-    }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
+    }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } });
+    root.appendChild(editCard);
+
+    // Ô hiển thị số tiền quy đổi VND, tự cập nhật theo Số tiền thực nhận (AUD) x Tỷ giá
+    const netInput = editCard.querySelector('input[name="net_amount_aud"]');
+    const rateInput = editCard.querySelector('input[name="rate_payout"]');
+    const vndBox = document.createElement("div");
+    vndBox.style.cssText = "background:var(--accent-soft);border-radius:8px;padding:12px 14px;margin:-6px 0 14px;";
+    function updateVndBox() {
+      const netAud = parseFloat(netInput.value) || 0;
+      const rate = parseFloat(rateInput.value) || 0;
+      const vnd = Math.round(netAud * rate);
+      vndBox.innerHTML = `<label style="margin-bottom:2px;">Số tiền quy đổi VND (chi trả cho NV)</label>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--accent);">${formatVND(vnd)}</div>`;
+    }
+    netInput.addEventListener("input", updateVndBox);
+    rateInput.addEventListener("input", updateVndBox);
+    updateVndBox();
+    editCard.querySelector(".grid").insertAdjacentElement("afterend", vndBox);
   }
 
   root.appendChild(filterBar("payouts", {
@@ -890,7 +912,7 @@ function renderPayouts(root) {
     card.innerHTML += "<div class='empty'>Không tìm thấy khoản thù lao phù hợp bộ lọc.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Gốc</th><th>Phí QL</th><th>Thuế 7%</th><th>Thực nhận</th><th>Trạng thái</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Gốc</th><th>Phí QL</th><th>Thuế 7%</th><th>Thực nhận</th><th>Quy đổi VND</th><th>Trạng thái</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(p => {
       const tr = document.createElement("tr");
@@ -907,6 +929,7 @@ function renderPayouts(root) {
         <td class="money">${aud(p.management_fee_cents)}</td>
         <td class="money">${aud(p.tax_withheld_cents)}</td>
         <td class="money"><b>${aud(p.net_amount_cents)}</b></td>
+        <td class="money">${formatVND(p.net_amount_vnd)}</td>
         <td>${statusBadge}</td><td class="actions-cell">${actions}</td>`;
       tbody.appendChild(tr);
     });
