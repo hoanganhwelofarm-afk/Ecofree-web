@@ -68,6 +68,7 @@ CREATE TABLE quotations (
   contract_type         TEXT NOT NULL CHECK (contract_type IN ('fixed','hourly')),
   fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')),
   total_amount_cents    INTEGER NOT NULL DEFAULT 0,
+  notes                 TEXT,
   status                TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','approved','rejected'))
 );
 
@@ -79,12 +80,15 @@ CREATE TABLE orders (
   order_code            TEXT UNIQUE NOT NULL,
   quotation_id          INTEGER NOT NULL REFERENCES quotations(quotation_id),
   client_id             INTEGER NOT NULL REFERENCES clients(client_id),
+  project_name          TEXT,                          -- copy từ quotations.project_name lúc duyệt
   contract_type         TEXT NOT NULL CHECK (contract_type IN ('fixed','hourly')),
   fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')),
   start_date            TEXT NOT NULL DEFAULT (date('now')),
   deadline              TEXT,
   estimated_hours       REAL,
   rate_estimated        REAL NOT NULL,
+  total_amount_cents    INTEGER NOT NULL DEFAULT 0,      -- copy từ quotations.total_amount_cents lúc duyệt — dùng để kiểm soát không vượt báo giá
+  notes                 TEXT,                            -- copy từ quotations.notes lúc duyệt
   status                TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','completed')),
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
