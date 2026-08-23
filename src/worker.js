@@ -92,12 +92,12 @@ async function deleteRecord(request, env, table, cfg, url) {
 }
 
 async function approveQuotation(request, env) {
-  const { quotation_id } = await request.json();
+  const { quotation_id, order_code } = await request.json();
   if (!quotation_id) return json({ error: "Thiếu quotation_id" }, 400);
+  if (!order_code) return json({ error: "Thiếu order_code (Mã đơn hàng)" }, 400);
   const q = await env.DB.prepare("SELECT * FROM quotations WHERE quotation_id = ?").bind(quotation_id).first();
   if (!q) return json({ error: "Không tìm thấy báo giá" }, 404);
   if (q.status === "approved") return json({ error: "Báo giá này đã được duyệt trước đó" }, 400);
-  const order_code = "DH-" + String(Date.now()).slice(-6);
   const res = await env.DB.prepare(
     `INSERT INTO orders (order_code, quotation_id, client_id, contract_type, fee_payer, start_date, rate_estimated, status)
      VALUES (?, ?, ?, ?, ?, date('now'), 1, 'in_progress')`
