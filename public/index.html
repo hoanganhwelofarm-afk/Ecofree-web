@@ -6,6 +6,7 @@
 <title>Ecofree — Quản lý Dự án & Dòng tiền</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root{
     --bg:#F6F7F3;
@@ -486,6 +487,7 @@ function renderQuotations(root) {
     { key: "contract_type", label: "Hình thức hợp đồng", type: "select", options: ["fixed","hourly"], labels:{fixed:"Trọn gói (Fixed)",hourly:"Theo giờ (Hourly)"}, default: editing?.contract_type },
     { key: "fee_payer", label: "Ai chịu phí chuyển tiền", type: "select", options: ["","client","ecofree"], labels:{"":"(Mặc định theo Khách hàng)",client:"Khách hàng",ecofree:"Ecofree"}, default: editing?.fee_payer },
     { key: "total_amount_aud", label: "Tổng giá trị báo giá (AUD)", type: "number", step:"0.01", default: editing ? fromCents(editing.total_amount_cents) : undefined },
+    { key: "notes", label: "Lưu ý (đơn giá dự án, ghi chú riêng — sẽ tự chuyển sang Đơn hàng khi duyệt)", type: "textarea", default: editing?.notes },
   ], async (data) => {
     data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
     if (!data.fee_payer) delete data.fee_payer;
@@ -602,18 +604,42 @@ function renderOrders(root) {
   if (!order) { selectedOrderId = null; return; }
 
   const detailHeader = document.createElement("div");
-  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Chi tiết: ${order.order_code} — ${clientName(order.client_id)}</h1>`;
+  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Chi tiết: ${order.order_code} — ${clientName(order.client_id)}${order.project_name ? " — " + order.project_name : ""}</h1>`;
   root.appendChild(detailHeader);
+
+  // Ô tổng giá trị đã báo giá — dùng chung cho cả 2 loại hợp đồng, để đối chiếu không vượt báo giá
+  const quotedTotal = order.total_amount_cents || 0;
+  const usedTotal = order.contract_type === "hourly"
+    ? cache.tasks.filter(t => t.order_id === order.order_id).reduce((s, t) => s + Math.round((t.hours||0) * t.client_rate_cents), 0)
+    : cache.order_staff_payout.filter(x => x.order_id === order.order_id).reduce((s, x) => s + x.fixed_amount_cents, 0);
+  const pct = quotedTotal > 0 ? Math.round((usedTotal / quotedTotal) * 100) : 0;
+  const overBudget = quotedTotal > 0 && usedTotal > quotedTotal;
+  const budgetCard = document.createElement("div");
+  budgetCard.className = "card";
+  budgetCard.style.borderColor = overBudget ? "var(--danger)" : "var(--border)";
+  budgetCard.innerHTML = `<h2>Tổng giá trị đã báo giá với Khách hàng</h2>
+    <div class="grid">
+      <div><label>Tổng đã báo giá</label><div class="money" style="font-size:16px;font-weight:600;">${aud(quotedTotal)}</div></div>
+      <div><label>${order.contract_type === "hourly" ? "Đã tính vào các Task" : "Đã phân bổ cho Nhân viên"}</label>
+        <div class="money" style="font-size:16px;font-weight:600;${overBudget?'color:var(--danger);':''}">${aud(usedTotal)} (${pct}%)</div></div>
+    </div>
+    ${overBudget ? "<div class='badge danger'>⚠️ Đã vượt tổng giá trị báo giá!</div>" : ""}
+    ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Lưu ý từ báo giá:</b> ${order.notes}</div>` : ""}`;
+  root.appendChild(budgetCard);
 
   const editingOrder = editingRecord && editingRecord.table === "orders" && editingRecord.id === order.order_id;
   if (editingOrder) {
     root.appendChild(formCard("Sửa thông tin đơn hàng", [
       { key: "order_code", label: "Mã đơn hàng", type: "text", required: true, default: order.order_code },
+      { key: "project_name", label: "Tên dự án", type: "text", default: order.project_name },
+      { key: "total_amount_aud", label: "Tổng giá trị đã báo giá (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
       { key: "deadline", label: "Deadline bàn giao", type: "date", default: order.deadline },
       { key: "estimated_hours", label: "Số giờ ước tính (dùng cho công thức nợ xấu)", type: "number", step:"0.25", default: order.estimated_hours },
       { key: "rate_estimated", label: "Tỷ giá dự kiến (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
       { key: "status", label: "Trạng thái", type: "select", options: ["in_progress","completed"], labels:{in_progress:"Đang chạy",completed:"Hoàn thành"}, default: order.status },
+      { key: "notes", label: "Lưu ý", type: "textarea", default: order.notes },
     ], async (data) => {
+      data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
       await api("/api/orders?id=" + order.order_id, "PUT", data);
       toast("Đã cập nhật đơn hàng."); editingRecord = null; render();
     }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
@@ -624,7 +650,8 @@ function renderOrders(root) {
 }
 
 function renderFixedOrderDetail(root, order) {
-  root.appendChild(formCard("Thêm tiền công cố định cho 1 nhân viên", [
+  // Phần 1: Trả lương cố định theo từng nhân viên (dùng để tính thù lao)
+  root.appendChild(formCard("Thêm nhân viên & tiền công cố định", [
     { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
     { key: "fixed_amount_aud", label: "Tiền công cố định (AUD)", type: "number", step:"0.01", required: true },
     { key: "delivered_date", label: "Ngày gửi kết quả", type: "date" },
@@ -639,7 +666,7 @@ function renderFixedOrderDetail(root, order) {
   const list = cache.order_staff_payout.filter(x => x.order_id === order.order_id);
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách nhân viên trong đơn này</h2>";
+  card.innerHTML = "<h2>Danh sách nhân viên & tiền công trong đơn này</h2>";
   if (list.length === 0) {
     card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
   } else {
@@ -658,26 +685,49 @@ function renderFixedOrderDetail(root, order) {
     tbl.addEventListener("click", async (e) => {
       const id = e.target.getAttribute("data-done");
       if (!id) return;
-      try { await api("/api/order_staff_payout?id=" + id, "PUT", { completed: 1 }); toast("Đã đánh dấu hoàn thành."); render(); }
-      catch (err) { toast(err.message, true); }
+      try {
+        await api("/api/order_staff_payout?id=" + id, "PUT", { completed: 1 });
+        toast("Đã đánh dấu hoàn thành.");
+        // Kiểm tra: nếu TẤT CẢ nhân viên trong đơn đã hoàn thành -> tự tạo Hóa đơn nháp
+        const res = await api("/api/check-fixed-order-invoice", "POST", { order_id: order.order_id });
+        if (res.created) toast(`Đã tự tạo Hóa đơn nháp ${res.invoice_code} — sang tab Hóa đơn để hoàn tất.`);
+        render();
+      } catch (err) { toast(err.message, true); }
     });
     card.appendChild(tbl);
   }
   root.appendChild(card);
-  root.appendChild(infoNote("Khi đơn hàng có Hóa đơn 'Đã thu tiền', các dòng đã đánh dấu Hoàn thành ở đây sẽ tự sinh Thù lao NV."));
+  root.appendChild(infoNote("Khi TẤT CẢ nhân viên trong đơn được đánh dấu Hoàn thành, hệ thống tự tạo 1 Hóa đơn nháp sang tab Hóa đơn (dùng đúng Tổng giá trị đã báo giá ở trên)."));
+
+  // Phần 2: Danh sách nhiệm vụ chung trong dự án (chỉ để theo dõi công việc, không dùng để tính tiền —
+  // vì Trọn gói tính theo tiền công cố định ở Phần 1, không tính theo giờ)
+  renderTaskTrackerSection(root, order, { showRates: false });
 }
 
-function renderHourlyOrderDetail(root, order) {
-  root.appendChild(formCard("Thêm nhiệm vụ (Task) mới", [
+// Dùng chung cho cả Loại A (chỉ theo dõi công việc, showRates=false) và Loại B (tính tiền, showRates=true)
+function renderTaskTrackerSection(root, order, opts) {
+  const showRates = opts && opts.showRates;
+  const fields = [
     { key: "task_name", label: "Tên nhiệm vụ", type: "text", required: true },
     { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
-    { key: "hours", label: "Số giờ làm việc", type: "number", step:"0.25" },
-    { key: "client_rate_aud", label: "Đơn giá charge Khách/giờ (AUD)", type: "number", step:"0.01" },
-    { key: "staff_rate_aud", label: "Đơn giá trả NV/giờ (AUD)", type: "number", step:"0.01" },
-  ], async (data) => {
+  ];
+  if (showRates) {
+    fields.push(
+      { key: "hours", label: "Số giờ làm việc", type: "number", step:"0.25" },
+      { key: "client_rate_aud", label: "Đơn giá charge Khách/giờ (AUD)", type: "number", step:"0.01" },
+      { key: "staff_rate_aud", label: "Đơn giá trả NV/giờ (AUD)", type: "number", step:"0.01" },
+    );
+  } else {
+    fields.push({ key: "hours", label: "Số giờ làm việc (tham khảo, không dùng tính tiền)", type: "number", step:"0.25" });
+  }
+  root.appendChild(formCard("Thêm nhiệm vụ (Task) mới", fields, async (data) => {
     data.order_id = order.order_id;
-    data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
-    data.staff_rate_cents = toCents(data.staff_rate_aud); delete data.staff_rate_aud;
+    if (showRates) {
+      data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
+      data.staff_rate_cents = toCents(data.staff_rate_aud); delete data.staff_rate_aud;
+    } else {
+      data.client_rate_cents = 0; data.staff_rate_cents = 0;
+    }
     data.status = "in_progress";
     await api("/api/tasks", "POST", data);
     toast("Đã thêm nhiệm vụ."); render();
@@ -686,20 +736,21 @@ function renderHourlyOrderDetail(root, order) {
   const tasks = cache.tasks.filter(t => t.order_id === order.order_id);
   const taskCard = document.createElement("div");
   taskCard.className = "card";
-  taskCard.innerHTML = "<h2>Danh sách nhiệm vụ</h2>";
+  taskCard.innerHTML = "<h2>Danh sách nhiệm vụ trong dự án</h2>";
   if (tasks.length === 0) {
     taskCard.innerHTML += "<div class='empty'>Chưa có nhiệm vụ nào.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Nhiệm vụ</th><th>Nhân viên</th><th>Giờ</th><th>Tiền thu Khách</th><th>Tiền trả NV</th><th>Trạng thái</th><th>Kỳ chốt</th><th></th></tr></thead>";
+    const rateHeaders = showRates ? "<th>Tiền thu Khách</th><th>Tiền trả NV</th>" : "";
+    tbl.innerHTML = `<thead><tr><th>Nhiệm vụ</th><th>Nhân viên</th><th>Giờ</th>${rateHeaders}<th>Trạng thái</th>${showRates?"<th>Kỳ chốt</th>":""}<th></th></tr></thead>`;
     const tbody = document.createElement("tbody");
     tasks.forEach(t => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours}</td>
-        <td class="money">${aud(Math.round(t.hours*t.client_rate_cents))}</td>
-        <td class="money">${aud(Math.round(t.hours*t.staff_rate_cents))}</td>
+      const rateCells = showRates ? `<td class="money">${aud(Math.round((t.hours||0)*t.client_rate_cents))}</td><td class="money">${aud(Math.round((t.hours||0)*t.staff_rate_cents))}</td>` : "";
+      const cycleCell = showRates ? `<td>${t.billing_cycle_id ? "<span class='badge muted'>Đã chốt #"+t.billing_cycle_id+"</span>" : "—"}</td>` : "";
+      tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours ?? "—"}</td>${rateCells}
         <td>${t.status === "completed" ? "<span class='badge ok'>Hoàn thành</span>" : "<span class='badge muted'>Đang làm</span>"}</td>
-        <td>${t.billing_cycle_id ? "<span class='badge muted'>Đã chốt #"+t.billing_cycle_id+"</span>" : "—"}</td>
+        ${cycleCell}
         <td>${t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Đánh dấu hoàn thành</button>` : "—"}</td>`;
       tbody.appendChild(tr);
     });
@@ -713,6 +764,10 @@ function renderHourlyOrderDetail(root, order) {
     taskCard.appendChild(tbl);
   }
   root.appendChild(taskCard);
+}
+
+function renderHourlyOrderDetail(root, order) {
+  renderTaskTrackerSection(root, order, { showRates: true });
 
   const closeCard = document.createElement("div");
   closeCard.className = "card";
@@ -729,7 +784,7 @@ function renderHourlyOrderDetail(root, order) {
     if (!period_start || !period_end) { toast("Chọn đủ khoảng thời gian.", true); return; }
     try {
       const res = await api("/api/close-billing-cycle", "POST", { order_id: order.order_id, period_start, period_end });
-      toast(`Đã chốt kỳ #${res.cycle_id} — ${res.task_count} task, thu Khách ${aud(res.total_client_amount_cents)}.`);
+      toast(`Đã chốt kỳ #${res.cycle_id} — ${res.task_count} task, và TỰ TẠO Hóa đơn nháp ${res.invoice_code} sang tab Hóa đơn.`);
       render();
     } catch (err) { toast(err.message, true); }
   });
@@ -745,55 +800,40 @@ function renderHourlyOrderDetail(root, order) {
       <td>#${c.cycle_id}</td><td>${c.period_start} → ${c.period_end}</td>
       <td class="money">${aud(c.total_client_amount_cents)}</td>
       <td class="money">${aud(c.total_staff_amount_cents)}</td>
-      <td>${c.invoice_id ? "<span class='badge ok'>Đã có hóa đơn</span>" : "<span class='badge warn'>Chưa xuất hóa đơn</span>"}</td>
+      <td>${c.invoice_id ? "<span class='badge ok'>Đã tạo hóa đơn #"+c.invoice_id+"</span>" : "<span class='badge warn'>Chưa có hóa đơn</span>"}</td>
     </tr>`).join("");
     cyclesCard.innerHTML += `<table><thead><tr><th>Kỳ</th><th>Khoảng thời gian</th><th>Thu Khách</th><th>Trả NV</th><th>Hóa đơn</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(cyclesCard);
-  root.appendChild(infoNote("Sau khi chốt kỳ, sang tab Hóa đơn để tạo hóa đơn thủ công dùng đúng số 'Thu Khách' ở trên làm Số tiền gốc."));
+  root.appendChild(infoNote("Mỗi lần Chốt kỳ, hệ thống tự sinh 1 Hóa đơn nháp bên tab Hóa đơn — bạn chỉ cần sang đó kiểm tra, điền Ngày gửi, rồi Xuất PDF gửi Khách."));
 }
 
 // ---------- HÓA ĐƠN ----------
 function renderInvoices(root) {
-  if (cache.orders.length === 0) {
-    root.appendChild(warnCard("Bạn cần có ít nhất 1 Đơn hàng trước khi tạo Hóa đơn."));
-  }
   const editing = editingRecord && editingRecord.table === "invoices" ? cache.invoices.find(i => i.invoice_id === editingRecord.id) : null;
-  if (editing) {
-    root.appendChild(warnCard("Đây là hóa đơn đã tạo. Nếu bạn đổi Trạng thái sang 'Đã thu tiền' ở đây, hệ thống vẫn sẽ TỰ SINH Thù lao NV tương ứng y như bấm nút 'Đánh dấu đã thu tiền'."));
-  }
-  root.appendChild(formCard(editing ? "Sửa hóa đơn: " + editing.invoice_code : "Tạo hóa đơn mới", editing ? [
-    { key: "invoice_code", label: "Mã hóa đơn", type: "text", required: true, default: editing.invoice_code },
-    { key: "base_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01", default: fromCents(editing.base_amount_cents) },
-    { key: "transfer_fee_aud", label: "Phí chuyển tiền bổ sung (AUD)", type: "number", step:"0.01", default: fromCents(editing.transfer_fee_cents) },
-    { key: "sent_date", label: "Ngày gửi hóa đơn cho khách", type: "date", default: editing.sent_date },
-    { key: "due_date", label: "Hạn thanh toán (theo hợp đồng)", type: "date", default: editing.due_date },
-    { key: "paid_date", label: "Ngày nhận tiền thực tế", type: "date", default: editing.paid_date },
-    { key: "status", label: "Trạng thái", type: "select", options: ["delivered_pending","sent_within_terms","overdue","paid"],
-      labels:{delivered_pending:"Đã bàn giao chờ HĐ",sent_within_terms:"Đã gửi trong hạn",overdue:"Quá hạn",paid:"Đã thu tiền"}, default: editing.status },
-  ] : [
-    { key: "invoice_code", label: "Mã hóa đơn", type: "text", required: true },
-    { key: "order_id", label: "Đơn hàng", type: "select", options: cache.orders.map(o=>o.order_id), labels: Object.fromEntries(cache.orders.map(o=>[o.order_id, o.order_code + " — " + clientName(o.client_id)])), required: true },
-    { key: "base_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01" },
-    { key: "transfer_fee_aud", label: "Phí chuyển tiền bổ sung (AUD)", type: "number", step:"0.01" },
-    { key: "sent_date", label: "Ngày gửi hóa đơn cho khách", type: "date", default: new Date().toISOString().slice(0,10) },
-    { key: "due_date", label: "Hạn thanh toán (theo hợp đồng)", type: "date" },
-  ], async (data) => {
-    data.base_amount_cents = toCents(data.base_amount_aud); delete data.base_amount_aud;
-    data.transfer_fee_cents = toCents(data.transfer_fee_aud); delete data.transfer_fee_aud;
-    data.total_amount_cents = data.base_amount_cents + data.transfer_fee_cents;
-    if (editing) {
+
+  if (!editing) {
+    root.appendChild(infoNote("ℹ️ Hóa đơn không tạo thủ công ở đây nữa — tự động sinh khi bạn 'Chốt kỳ Billing' (Loại B) hoặc khi đánh dấu Hoàn thành hết nhân viên trong đơn (Loại A), ở tab Đơn hàng. Bạn chỉ cần kiểm tra, bổ sung Ngày gửi, rồi Xuất PDF gửi Khách."));
+  } else {
+    root.appendChild(warnCard("Đang sửa hóa đơn đã tạo. Nếu bạn đổi Trạng thái sang 'Đã thu tiền' ở đây, hệ thống vẫn sẽ TỰ SINH Thù lao NV tương ứng y như bấm nút 'Đánh dấu đã thu tiền'."));
+    root.appendChild(formCard("Sửa hóa đơn: " + editing.invoice_code, [
+      { key: "invoice_code", label: "Mã hóa đơn", type: "text", required: true, default: editing.invoice_code },
+      { key: "base_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01", default: fromCents(editing.base_amount_cents) },
+      { key: "transfer_fee_aud", label: "Phí chuyển tiền bổ sung (AUD)", type: "number", step:"0.01", default: fromCents(editing.transfer_fee_cents) },
+      { key: "sent_date", label: "Ngày gửi hóa đơn cho khách", type: "date", default: editing.sent_date },
+      { key: "due_date", label: "Hạn thanh toán (theo hợp đồng)", type: "date", default: editing.due_date },
+      { key: "paid_date", label: "Ngày nhận tiền thực tế", type: "date", default: editing.paid_date },
+      { key: "status", label: "Trạng thái", type: "select", options: ["delivered_pending","sent_within_terms","overdue","paid"],
+        labels:{delivered_pending:"Đã bàn giao chờ HĐ",sent_within_terms:"Đã gửi trong hạn",overdue:"Quá hạn",paid:"Đã thu tiền"}, default: editing.status },
+    ], async (data) => {
+      data.base_amount_cents = toCents(data.base_amount_aud); delete data.base_amount_aud;
+      data.transfer_fee_cents = toCents(data.transfer_fee_aud); delete data.transfer_fee_aud;
+      data.total_amount_cents = data.base_amount_cents + data.transfer_fee_cents;
       await api("/api/invoices?id=" + editing.invoice_id, "PUT", data);
       toast("Đã cập nhật hóa đơn."); editingRecord = null; render();
-    } else {
-      const order = cache.orders.find(o => o.order_id == data.order_id);
-      data.client_id = order.client_id;
-      data.status = "sent_within_terms";
-      await api("/api/invoices", "POST", data);
-      toast("Đã tạo hóa đơn."); render();
-    }
-  }, editing ? [{ key: "reminder_sent", label: "Đã gửi nhắc nợ ngày thứ 7", checked: editing.reminder_sent }] : null,
-  { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
+    }, [{ key: "reminder_sent", label: "Đã gửi nhắc nợ ngày thứ 7", checked: editing.reminder_sent }],
+    { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
+  }
 
   root.appendChild(filterBar("invoices", {
     placeholder: "Tìm theo mã hóa đơn, khách hàng…",
@@ -810,7 +850,7 @@ function renderInvoices(root) {
   card.className = "card";
   card.innerHTML = "<h2>Danh sách hóa đơn</h2>";
   if (cache.invoices.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có hóa đơn nào.</div>";
+    card.innerHTML += "<div class='empty'>Chưa có hóa đơn nào — sẽ tự sinh khi bạn Chốt kỳ (tab Đơn hàng).</div>";
   } else if (list.length === 0) {
     card.innerHTML += "<div class='empty'>Không tìm thấy hóa đơn phù hợp bộ lọc.</div>";
   } else {
@@ -829,13 +869,14 @@ function renderInvoices(root) {
       tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
         <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date || "—"}</td><td>${i.due_date || "—"}</td>
         <td>${statusBadge}${remindBadge}</td>
-        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Sửa</button></td>`;
+        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Sửa</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Xuất PDF</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
     tbl.addEventListener("click", async (e) => {
       const payId = e.target.getAttribute("data-pay");
       const editId = e.target.getAttribute("data-edit");
+      const pdfId = e.target.getAttribute("data-pdf");
       if (payId) {
         try {
           await api("/api/invoices?id=" + payId, "PUT", { status: "paid", paid_date: new Date().toISOString().slice(0,10) });
@@ -844,10 +885,58 @@ function renderInvoices(root) {
         } catch (err) { toast(err.message, true); }
       }
       if (editId) { editingRecord = { table: "invoices", id: parseInt(editId) }; render(); }
+      if (pdfId) {
+        try { toast("Đang tạo PDF…"); await exportInvoicePDF(parseInt(pdfId)); }
+        catch (err) { toast(err.message, true); }
+      }
     });
     card.appendChild(tbl);
   }
   root.appendChild(card);
+}
+
+async function exportInvoicePDF(invoiceId) {
+  const d = await api("/api/invoice-detail?id=" + invoiceId);
+  const inv = d.invoice;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y = 20;
+  doc.setFontSize(18); doc.setFont(undefined, "bold");
+  doc.text("HÓA ĐƠN / INVOICE", 14, y); y += 6;
+  doc.setFontSize(10); doc.setFont(undefined, "normal");
+  doc.text("Ecofree — Freelance Team", 14, y); y += 10;
+
+  doc.setFontSize(11);
+  doc.text(`Mã hóa đơn: ${inv.invoice_code}`, 14, y); y += 6;
+  doc.text(`Ngày gửi: ${inv.sent_date || "—"}    Hạn thanh toán: ${inv.due_date || "—"}`, 14, y); y += 10;
+
+  doc.setFont(undefined, "bold"); doc.text("Khách hàng", 14, y); doc.setFont(undefined, "normal"); y += 6;
+  doc.text(`${d.client_name || "—"}`, 14, y); y += 5;
+  doc.text(`${d.client_email || "—"}`, 14, y); y += 8;
+
+  doc.setFont(undefined, "bold"); doc.text("Dự án", 14, y); doc.setFont(undefined, "normal"); y += 6;
+  doc.text(`${d.project_name || "—"}`, 14, y); y += 10;
+
+  doc.setFont(undefined, "bold");
+  doc.text("Công việc", 14, y); doc.text("Giờ", 110, y); doc.text("Đơn giá", 135, y); doc.text("Thành tiền", 168, y);
+  doc.setFont(undefined, "normal"); y += 2;
+  doc.line(14, y, 196, y); y += 6;
+
+  d.line_items.forEach(li => {
+    doc.text(String(li.task_name || "").slice(0, 45), 14, y);
+    doc.text(li.hours !== null ? String(li.hours) : "—", 110, y);
+    doc.text(li.rate_cents !== null ? aud(li.rate_cents) : "—", 135, y);
+    doc.text(aud(li.amount_cents), 168, y);
+    y += 6;
+  });
+  y += 2; doc.line(14, y, 196, y); y += 8;
+
+  doc.text("Tổng tiền công việc:", 120, y); doc.text(aud(inv.base_amount_cents), 168, y); y += 6;
+  doc.text("Phí chuyển đổi (5%):", 120, y); doc.text(aud(inv.transfer_fee_cents), 168, y); y += 6;
+  doc.setFont(undefined, "bold"); doc.setFontSize(12);
+  doc.text("TỔNG THANH TOÁN:", 120, y); doc.text(aud(inv.total_amount_cents), 168, y);
+
+  doc.save(`${inv.invoice_code}.pdf`);
 }
 
 // ---------- PAYOUT ----------
@@ -1035,6 +1124,9 @@ function formCard(title, fields, onSubmit, extraCheckboxes, options) {
     if (f.type === "select") {
       const opts = f.options.map(o => `<option value="${o}" ${String(f.default)===String(o)?"selected":""}>${(f.labels && f.labels[o]) || o}</option>`).join("");
       inputHtml = `<select name="${f.key}" ${f.required?"required":""}>${opts}</select>`;
+    } else if (f.type === "textarea") {
+      wrap.style.gridColumn = "1 / -1";
+      inputHtml = `<textarea name="${f.key}" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;resize:vertical;" ${f.required?"required":""}>${f.default!==undefined && f.default!==null?f.default:""}</textarea>`;
     } else {
       inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.required?"required":""} value="${f.default!==undefined && f.default!==null?f.default:""}">`;
     }
