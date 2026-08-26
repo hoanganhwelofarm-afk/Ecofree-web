@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ecofree — Quản lý Dự án & Dòng tiền</title>
+<title>Ecofree — Project & Cash Flow Management</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -88,7 +88,7 @@
 <body>
 
 <aside>
-  <div class="logo">Ecofree<span>Dự án &amp; dòng tiền</span></div>
+  <div class="logo">Ecofree<span>Projects &amp; Cash Flow</span></div>
   <nav id="nav"></nav>
 </aside>
 
@@ -102,24 +102,24 @@
 
 <script>
 const TABS = [
-  { id:"tongquan", label:"Tổng quan" },
-  { id:"clients", label:"Khách hàng" },
-  { id:"staff", label:"Nhân viên" },
-  { id:"quotations", label:"Báo giá" },
-  { id:"orders", label:"Đơn hàng" },
-  { id:"invoices", label:"Hóa đơn" },
-  { id:"payouts", label:"Thù lao NV" },
-  { id:"reports", label:"Báo cáo" },
+  { id:"tongquan", label:"Dashboard" },
+  { id:"clients", label:"Clients" },
+  { id:"staff", label:"Staff" },
+  { id:"quotations", label:"Quotes" },
+  { id:"orders", label:"Jobs" },
+  { id:"invoices", label:"Invoices" },
+  { id:"payouts", label:"Staff Payouts" },
+  { id:"reports", label:"Reports" },
 ];
 const PAGE_SUBTITLE = {
-  tongquan: "Việc cần làm hôm nay",
-  clients: "Hồ sơ khách hàng & cấu hình phí chuyển tiền",
-  staff: "Hồ sơ nhân viên & tỷ lệ phí quản lý",
-  quotations: "Tạo báo giá, duyệt thành đơn hàng",
-  orders: "Đơn hàng đang chạy — Trọn gói / Theo giờ",
-  invoices: "Hóa đơn, hạn thanh toán & nhắc nợ ngày thứ 7",
-  payouts: "Tính & duyệt thù lao nhân viên",
-  reports: "Dòng tiền thực nhận & rủi ro nợ xấu",
+  tongquan: "Today's action items",
+  clients: "Client records & transfer fee settings",
+  staff: "Staff records & management fee rate",
+  quotations: "Create quotes, approve into jobs",
+  orders: "Active jobs — Fixed Price / Hourly",
+  invoices: "Invoices, due dates & Day-7 payment reminders",
+  payouts: "Calculate & approve staff payouts",
+  reports: "Net cash flow & bad debt risk",
 };
 
 let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [], tasks: [], order_staff_payout: [], billing_cycles: [] };
@@ -152,7 +152,7 @@ function filterBar(tab, opts) {
 
   const searchInput = document.createElement("input");
   searchInput.type = "text";
-  searchInput.placeholder = opts.placeholder || "Tìm kiếm…";
+  searchInput.placeholder = opts.placeholder || "Search…";
   searchInput.value = filters[tab].q;
   searchInput.style.maxWidth = "260px";
   searchInput.addEventListener("input", () => { filters[tab].q = searchInput.value; renderCurrentTabOnly(); });
@@ -161,21 +161,21 @@ function filterBar(tab, opts) {
   if (opts.statusOptions) {
     const sel = document.createElement("select");
     sel.style.maxWidth = "180px";
-    sel.innerHTML = `<option value="">Tất cả trạng thái</option>` + opts.statusOptions.map(o => `<option value="${o.value}" ${filters[tab].status===o.value?"selected":""}>${o.label}</option>`).join("");
+    sel.innerHTML = `<option value="">All statuses</option>` + opts.statusOptions.map(o => `<option value="${o.value}" ${filters[tab].status===o.value?"selected":""}>${o.label}</option>`).join("");
     sel.addEventListener("change", () => { filters[tab].status = sel.value; renderCurrentTabOnly(); });
     row.appendChild(sel);
   }
   if (opts.typeOptions) {
     const sel2 = document.createElement("select");
     sel2.style.maxWidth = "180px";
-    sel2.innerHTML = `<option value="">Tất cả hình thức</option>` + opts.typeOptions.map(o => `<option value="${o.value}" ${filters[tab].type===o.value?"selected":""}>${o.label}</option>`).join("");
+    sel2.innerHTML = `<option value="">All types</option>` + opts.typeOptions.map(o => `<option value="${o.value}" ${filters[tab].type===o.value?"selected":""}>${o.label}</option>`).join("");
     sel2.addEventListener("change", () => { filters[tab].type = sel2.value; renderCurrentTabOnly(); });
     row.appendChild(sel2);
   }
   if (opts.activeOnlyToggle) {
     const label = document.createElement("label");
     label.style.display = "flex"; label.style.alignItems = "center"; label.style.gap = "6px"; label.style.fontSize = "13.5px"; label.style.fontWeight = "500"; label.style.color = "var(--text)";
-    label.innerHTML = `<input type="checkbox" style="width:auto;" ${filters[tab].activeOnly?"checked":""}> Chỉ hiện đang làm việc`;
+    label.innerHTML = `<input type="checkbox" style="width:auto;" ${filters[tab].activeOnly?"checked":""}> Active only`;
     label.querySelector("input").addEventListener("change", (e) => { filters[tab].activeOnly = e.target.checked; renderCurrentTabOnly(); });
     row.appendChild(label);
   }
@@ -190,7 +190,7 @@ async function api(path, method = "GET", body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Có lỗi xảy ra");
+  if (!res.ok) throw new Error(data.error || "Something went wrong");
   return data;
 }
 
@@ -262,13 +262,13 @@ function renderNav() {
 async function render() {
   renderNav();
   const content = document.getElementById("content");
-  content.innerHTML = "<div class='empty'>Đang tải…</div>";
+  content.innerHTML = "<div class='empty'>Loading…</div>";
   try {
     await loadAll();
     renderCurrentTabOnly();
   } catch (e) {
-    content.innerHTML = "<div class='card'><b>Không tải được dữ liệu.</b><br>" + e.message +
-      "<br><br>Kiểm tra lại: đã tạo D1 database, chạy schema.sql, và gắn D1 binding tên <code>DB</code> vào project Pages chưa?</div>";
+    content.innerHTML = "<div class='card'><b>Failed to load data.</b><br>" + e.message +
+      "<br><br>Please check: have you created the D1 database, run schema.sql, and attached the D1 binding named <code>DB</code> to the project?</div>";
   }
 }
 
@@ -300,9 +300,9 @@ function renderTongQuan(root) {
 
   const card1 = document.createElement("div");
   card1.className = "card";
-  card1.innerHTML = "<h2>🔔 Cần gửi nhắc nợ (đã 7 ngày kể từ ngày gửi hóa đơn)</h2>";
+  card1.innerHTML = "<h2>🔔 Payment Reminders Due (7 days since invoice sent)</h2>";
   if (needReminder.length === 0) {
-    card1.innerHTML += "<div class='empty'>Không có hóa đơn nào cần nhắc hôm nay.</div>";
+    card1.innerHTML += "<div class='empty'>No invoices need a reminder today.</div>";
   } else {
     const tbl = buildInvoiceReminderTable(needReminder);
     card1.appendChild(tbl);
@@ -311,46 +311,46 @@ function renderTongQuan(root) {
 
   const card2 = document.createElement("div");
   card2.className = "card";
-  card2.innerHTML = "<h2>⚠️ Hóa đơn đã quá hạn thanh toán</h2>";
+  card2.innerHTML = "<h2>⚠️ Overdue Invoices</h2>";
   if (overdue.length === 0) {
-    card2.innerHTML += "<div class='empty'>Không có hóa đơn quá hạn.</div>";
+    card2.innerHTML += "<div class='empty'>No overdue invoices.</div>";
   } else {
     const rows = overdue.map(i => `<tr>
       <td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
       <td class="money">${aud(i.total_amount_cents)}</td>
       <td>${i.due_date}</td>
-      <td><span class="badge danger">Quá hạn</span></td>
+      <td><span class="badge danger">Overdue</span></td>
     </tr>`).join("");
-    card2.innerHTML += `<table><thead><tr><th>Hóa đơn</th><th>Khách hàng</th><th>Tổng tiền</th><th>Hạn TT</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card2.innerHTML += `<table><thead><tr><th>Invoice</th><th>Client</th><th>Total</th><th>Due Date</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card2);
 
   const card3 = document.createElement("div");
   card3.className = "card";
-  card3.innerHTML = "<h2>⏳ Thù lao đang chờ duyệt</h2>";
+  card3.innerHTML = "<h2>⏳ Staff Payouts Pending Approval</h2>";
   const pending = cache.payouts.filter(p => p.status === "pending_approval");
   if (pending.length === 0) {
-    card3.innerHTML += "<div class='empty'>Không có khoản nào chờ duyệt.</div>";
+    card3.innerHTML += "<div class='empty'>No payouts pending approval.</div>";
   } else {
     const rows = pending.map(p => `<tr><td>${staffName(p.staff_id)}</td><td>${orderLabel(p.order_id)}</td><td class="money">${aud(p.net_amount_cents || p.gross_amount_cents)}</td></tr>`).join("");
-    card3.innerHTML += `<table><thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Số tiền</th></tr></thead><tbody>${rows}</tbody></table>`;
+    card3.innerHTML += `<table><thead><tr><th>Staff</th><th>Job</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card3);
 }
 
 function buildInvoiceReminderTable(list) {
   const wrap = document.createElement("table");
-  wrap.innerHTML = "<thead><tr><th>Hóa đơn</th><th>Khách hàng</th><th>Tổng tiền</th><th>Ngày gửi</th><th></th></tr></thead>";
+  wrap.innerHTML = "<thead><tr><th>Invoice</th><th>Client</th><th>Total</th><th>Sent Date</th><th></th></tr></thead>";
   const tbody = document.createElement("tbody");
   list.forEach(i => {
     const tr = document.createElement("tr");
     const client = cache.clients.find(c => c.client_id == i.client_id);
     const mailLink = client && client.email
-      ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${client.email}?subject=Nhắc thanh toán hóa đơn ${i.invoice_code}&body=Kính gửi ${encodeURIComponent(client.company_name)}, hóa đơn ${i.invoice_code} đã gửi được 7 ngày, mong quý khách xác nhận đã nhận được và sắp xếp thanh toán." target="_blank">Soạn email nhắc</a>`
-      : "<span class='empty'>Khách chưa có email</span>";
+      ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${client.email}?subject=Payment Reminder — Invoice ${i.invoice_code}&body=Dear ${encodeURIComponent(client.company_name)}, this is a friendly reminder that invoice ${i.invoice_code} was sent 7 days ago. Please confirm receipt and arrange payment at your earliest convenience. Thank you." target="_blank">Draft Reminder Email</a>`
+      : "<span class='empty'>Client has no email on file</span>";
     tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
       <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date}</td>
-      <td class="actions-cell">${mailLink}<button class="ghost" data-mark="${i.invoice_id}">Đánh dấu đã gửi nhắc</button></td>`;
+      <td class="actions-cell">${mailLink}<button class="ghost" data-mark="${i.invoice_id}">Mark Reminder Sent</button></td>`;
     tbody.appendChild(tr);
   });
   wrap.appendChild(tbody);
@@ -359,7 +359,7 @@ function buildInvoiceReminderTable(list) {
     if (!id) return;
     try {
       await api("/api/invoices?id=" + id, "PUT", { reminder_sent: 1 });
-      toast("Đã đánh dấu gửi nhắc.");
+      toast("Reminder marked as sent.");
       render();
     } catch (err) { toast(err.message, true); }
   });
@@ -369,42 +369,42 @@ function buildInvoiceReminderTable(list) {
 // ---------- KHÁCH HÀNG ----------
 function renderClients(root) {
   const editing = editingRecord && editingRecord.table === "clients" ? cache.clients.find(c => c.client_id === editingRecord.id) : null;
-  root.appendChild(formCard(editing ? "Sửa khách hàng: " + editing.company_name : "Thêm khách hàng mới", [
-    { key: "client_code", label: "Mã khách hàng", type: "text", required: true, default: editing?.client_code },
-    { key: "company_name", label: "Tên công ty / Nhà thầu", type: "text", required: true, default: editing?.company_name },
-    { key: "contact_person", label: "Người liên hệ", type: "text", default: editing?.contact_person },
+  root.appendChild(formCard(editing ? "Edit Client: " + editing.company_name : "Add New Client", [
+    { key: "client_code", label: "Client Code", type: "text", required: true, default: editing?.client_code },
+    { key: "company_name", label: "Company / Contractor Name", type: "text", required: true, default: editing?.company_name },
+    { key: "contact_person", label: "Contact Person", type: "text", default: editing?.contact_person },
     { key: "email", label: "Email", type: "email", default: editing?.email },
-    { key: "phone", label: "Số điện thoại", type: "text", default: editing?.phone },
+    { key: "phone", label: "Phone Number", type: "text", default: editing?.phone },
   ], async (data) => {
     data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
     if (editing) {
       await api("/api/clients?id=" + editing.client_id, "PUT", data);
-      toast("Đã cập nhật khách hàng."); editingRecord = null; render();
+      toast("Client updated."); editingRecord = null; render();
     } else {
       await api("/api/clients", "POST", data);
-      toast("Đã thêm khách hàng."); render();
+      toast("Client added."); render();
     }
-  }, [{ key: "client_pays_fee_default", label: "Khách hàng chịu phí chuyển tiền 5% (mặc định)", checked: editing?.client_pays_fee_default }],
-  { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
+  }, [{ key: "client_pays_fee_default", label: "Client pays the 5% transfer fee (default)", checked: editing?.client_pays_fee_default }],
+  { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
-  root.appendChild(filterBar("clients", { placeholder: "Tìm theo mã, tên công ty, người liên hệ, email…" }));
+  root.appendChild(filterBar("clients", { placeholder: "Search by code, company, contact, email…" }));
 
   const list = cache.clients.filter(c => matchesText(filters.clients.q, c.client_code, c.company_name, c.contact_person, c.email, c.phone));
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách khách hàng</h2>";
+  card.innerHTML = "<h2>Client List</h2>";
   if (cache.clients.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có khách hàng nào.</div>";
+    card.innerHTML += "<div class='empty'>No clients yet.</div>";
   } else if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy khách hàng phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No clients match your filter.</div>";
   } else {
     const rows = list.map(c => `<tr>
       <td>${c.client_code}</td><td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
       <td>${c.email || "—"}</td><td>${c.phone || "—"}</td>
-      <td>${c.client_pays_fee_default ? "<span class='badge muted'>Khách chịu phí</span>" : "<span class='badge muted'>Ecofree chịu phí</span>"}</td>
-      <td><button class="ghost" data-edit="${c.client_id}">Sửa</button></td>
+      <td>${c.client_pays_fee_default ? "<span class='badge muted'>Client Pays Fee</span>" : "<span class='badge muted'>Ecofree Pays Fee</span>"}</td>
+      <td><button class="ghost" data-edit="${c.client_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Công ty</th><th>Người liên hệ</th><th>Email</th><th>Phone</th><th>Phí mặc định</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Code</th><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Default Fee</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -418,47 +418,47 @@ function renderClients(root) {
 // ---------- NHÂN VIÊN ----------
 function renderStaff(root) {
   const editing = editingRecord && editingRecord.table === "staff" ? cache.staff.find(s => s.staff_id === editingRecord.id) : null;
-  root.appendChild(formCard(editing ? "Sửa nhân viên: " + editing.full_name : "Thêm nhân viên mới", [
-    { key: "staff_code", label: "Mã nhân viên", type: "text", required: true, default: editing?.staff_code },
-    { key: "full_name", label: "Họ tên", type: "text", required: true, default: editing?.full_name },
-    { key: "role", label: "Vị trí", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
-    { key: "avg_hourly_rate_aud", label: "Đơn giá TB/giờ (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
-    { key: "management_fee_rate", label: "Tỷ lệ phí quản lý", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"}, default: editing?.management_fee_rate },
-    { key: "user_role", label: "Vai trò hệ thống", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Kế toán",manager:"Manager"}, default: editing?.user_role },
+  root.appendChild(formCard(editing ? "Edit Staff: " + editing.full_name : "Add New Staff", [
+    { key: "staff_code", label: "Staff Code", type: "text", required: true, default: editing?.staff_code },
+    { key: "full_name", label: "Full Name", type: "text", required: true, default: editing?.full_name },
+    { key: "role", label: "Position", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
+    { key: "avg_hourly_rate_aud", label: "Avg. Hourly Rate (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
+    { key: "management_fee_rate", label: "Management Fee Rate", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"}, default: editing?.management_fee_rate },
+    { key: "user_role", label: "System Role", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Accountant",manager:"Manager"}, default: editing?.user_role },
   ], async (data) => {
     data.management_fee_rate = parseInt(data.management_fee_rate);
     data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
     if (editing) {
       data.is_active = data.is_active ? 1 : 0;
       await api("/api/staff?id=" + editing.staff_id, "PUT", data);
-      toast("Đã cập nhật nhân viên."); editingRecord = null; render();
+      toast("Staff updated."); editingRecord = null; render();
     } else {
       data.is_active = 1;
       await api("/api/staff", "POST", data);
-      toast("Đã thêm nhân viên."); render();
+      toast("Staff added."); render();
     }
-  }, editing ? [{ key: "is_active", label: "Đang làm việc (bỏ tick nếu đã nghỉ)", checked: editing.is_active }] : null,
-  { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
+  }, editing ? [{ key: "is_active", label: "Currently active (uncheck if no longer working here)", checked: editing.is_active }] : null,
+  { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
-  root.appendChild(filterBar("staff", { placeholder: "Tìm theo mã, họ tên, vị trí…", activeOnlyToggle: true }));
+  root.appendChild(filterBar("staff", { placeholder: "Search by code, name, position…", activeOnlyToggle: true }));
 
   let list = cache.staff.filter(s => matchesText(filters.staff.q, s.staff_code, s.full_name, s.role));
   if (filters.staff.activeOnly) list = list.filter(s => s.is_active);
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách nhân viên</h2>";
+  card.innerHTML = "<h2>Staff List</h2>";
   if (cache.staff.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
+    card.innerHTML += "<div class='empty'>No staff yet.</div>";
   } else if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy nhân viên phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No staff match your filter.</div>";
   } else {
     const rows = list.map(s => `<tr>
-      <td>${s.staff_code}</td><td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Đã nghỉ</span>"}</td><td>${s.role}</td>
-      <td class="money">${aud(s.avg_hourly_rate_cents)}/giờ</td>
+      <td>${s.staff_code}</td><td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
+      <td class="money">${aud(s.avg_hourly_rate_cents)}/hr</td>
       <td>${s.management_fee_rate}%</td><td>${s.user_role}</td>
-      <td><button class="ghost" data-edit="${s.staff_id}">Sửa</button></td>
+      <td><button class="ghost" data-edit="${s.staff_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Mã</th><th>Họ tên</th><th>Vị trí</th><th>Đơn giá TB</th><th>Phí QL</th><th>Vai trò</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Code</th><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -472,40 +472,40 @@ function renderStaff(root) {
 // ---------- BÁO GIÁ ----------
 function renderQuotations(root) {
   if (cache.clients.length === 0) {
-    root.appendChild(warnCard("Bạn cần tạo ít nhất 1 Khách hàng trước khi tạo Báo giá."));
+    root.appendChild(warnCard("You need to add at least 1 Client before creating a Quote."));
   }
   const editing = editingRecord && editingRecord.table === "quotations" ? cache.quotations.find(q => q.quotation_id === editingRecord.id) : null;
   if (editing && editing.status === "approved") {
-    root.appendChild(warnCard("Báo giá này đã được duyệt thành Đơn hàng — sửa ở đây sẽ KHÔNG tự cập nhật lại Đơn hàng đã tạo. Nếu cần sửa số liệu Đơn hàng, hãy sửa trực tiếp ở tab Đơn hàng."));
+    root.appendChild(warnCard("This quote has already been approved into a Job — editing it here will NOT update the existing job. To change the job's figures, edit it directly on the Jobs tab."));
   }
-  root.appendChild(formCard(editing ? "Sửa báo giá: " + editing.quotation_code : "Tạo báo giá mới", [
-    { key: "quotation_code", label: "Mã báo giá", type: "text", required: true, default: editing?.quotation_code },
-    { key: "client_id", label: "Khách hàng", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true, default: editing?.client_id },
-    { key: "project_name", label: "Tên dự án", type: "text", required: true, default: editing?.project_name },
-    { key: "created_date", label: "Ngày tạo", type: "date", default: editing?.created_date || new Date().toISOString().slice(0,10) },
-    { key: "valid_until", label: "Hạn báo giá", type: "date", default: editing?.valid_until },
-    { key: "contract_type", label: "Hình thức hợp đồng", type: "select", options: ["fixed","hourly"], labels:{fixed:"Trọn gói (Fixed)",hourly:"Theo giờ (Hourly)"}, default: editing?.contract_type },
-    { key: "fee_payer", label: "Ai chịu phí chuyển tiền", type: "select", options: ["","client","ecofree"], labels:{"":"(Mặc định theo Khách hàng)",client:"Khách hàng",ecofree:"Ecofree"}, default: editing?.fee_payer },
-    { key: "total_amount_aud", label: "Tổng giá trị báo giá (AUD)", type: "number", step:"0.01", default: editing ? fromCents(editing.total_amount_cents) : undefined },
-    { key: "notes", label: "Lưu ý (đơn giá dự án, ghi chú riêng — sẽ tự chuyển sang Đơn hàng khi duyệt)", type: "textarea", default: editing?.notes },
+  root.appendChild(formCard(editing ? "Edit Quote: " + editing.quotation_code : "Create New Quote", [
+    { key: "quotation_code", label: "Quote Code", type: "text", required: true, default: editing?.quotation_code },
+    { key: "client_id", label: "Client", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true, default: editing?.client_id },
+    { key: "project_name", label: "Project Name", type: "text", required: true, default: editing?.project_name },
+    { key: "created_date", label: "Date Created", type: "date", default: editing?.created_date || new Date().toISOString().slice(0,10) },
+    { key: "valid_until", label: "Quote Valid Until", type: "date", default: editing?.valid_until },
+    { key: "contract_type", label: "Contract Type", type: "select", options: ["fixed","hourly"], labels:{fixed:"Fixed Price",hourly:"Hourly"}, default: editing?.contract_type },
+    { key: "fee_payer", label: "Who Pays the Transfer Fee", type: "select", options: ["","client","ecofree"], labels:{"":"(Use Client default)",client:"Client",ecofree:"Ecofree"}, default: editing?.fee_payer },
+    { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: editing ? fromCents(editing.total_amount_cents) : undefined },
+    { key: "notes", label: "Notes (project pricing notes — will carry over to the Job when approved)", type: "textarea", default: editing?.notes },
   ], async (data) => {
     data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
     if (!data.fee_payer) delete data.fee_payer;
     if (editing) {
       await api("/api/quotations?id=" + editing.quotation_id, "PUT", data);
-      toast("Đã cập nhật báo giá."); editingRecord = null; render();
+      toast("Quote updated."); editingRecord = null; render();
     } else {
       data.status = "sent";
       await api("/api/quotations", "POST", data);
-      toast("Đã tạo báo giá."); render();
+      toast("Quote created."); render();
     }
-  }, null, { editing: !!editing, submitLabel: editing ? "Cập nhật" : "Lưu", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
+  }, null, { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   root.appendChild(filterBar("quotations", {
-    placeholder: "Tìm theo mã, tên dự án, khách hàng…",
+    placeholder: "Search by code, project name, client…",
     statusOptions: [
-      { value: "draft", label: "Nháp" }, { value: "sent", label: "Đã gửi" },
-      { value: "approved", label: "Đã duyệt" }, { value: "rejected", label: "Từ chối" },
+      { value: "draft", label: "Draft" }, { value: "sent", label: "Sent" },
+      { value: "approved", label: "Approved" }, { value: "rejected", label: "Rejected" },
     ],
   }));
 
@@ -514,23 +514,23 @@ function renderQuotations(root) {
 
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách báo giá</h2>";
+  card.innerHTML = "<h2>Quote List</h2>";
   if (cache.quotations.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có báo giá nào.</div>";
+    card.innerHTML += "<div class='empty'>No quotes yet.</div>";
   } else if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy báo giá phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No quotes match your filter.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Mã</th><th>Khách hàng</th><th>Dự án</th><th>Hình thức</th><th>Giá trị</th><th>Trạng thái</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Code</th><th>Client</th><th>Project</th><th>Type</th><th>Amount</th><th>Status</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(q => {
       const tr = document.createElement("tr");
-      const statusBadge = q.status === "approved" ? "<span class='badge ok'>Đã duyệt</span>" : "<span class='badge muted'>" + q.status + "</span>";
-      const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Duyệt → Đơn hàng</button>` : "";
+      const statusBadge = q.status === "approved" ? "<span class='badge ok'>Approved</span>" : "<span class='badge muted'>" + q.status + "</span>";
+      const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Approve → Create Job</button>` : "";
       tr.innerHTML = `<td>${q.quotation_code}</td><td>${clientName(q.client_id)}</td><td>${q.project_name}</td>
-        <td>${q.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+        <td>${q.contract_type === "fixed" ? "Fixed Price" : "Hourly"}</td>
         <td class="money">${aud(q.total_amount_cents)}</td><td>${statusBadge}</td>
-        <td class="actions-cell">${approveBtn}<button class="ghost" data-edit="${q.quotation_id}">Sửa</button></td>`;
+        <td class="actions-cell">${approveBtn}<button class="ghost" data-edit="${q.quotation_id}">Edit</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -538,11 +538,11 @@ function renderQuotations(root) {
       const approveId = e.target.getAttribute("data-approve");
       const editId = e.target.getAttribute("data-edit");
       if (approveId) {
-        const order_code = window.prompt("Nhập Mã đơn hàng cho đơn mới:", "");
-        if (!order_code) { toast("Bạn cần nhập Mã đơn hàng để tiếp tục.", true); return; }
+        const order_code = window.prompt("Enter the Job Code for the new job:", "");
+        if (!order_code) { toast("You must enter a Job Code to continue.", true); return; }
         try {
           const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(approveId), order_code });
-          toast("Đã tạo đơn hàng " + res.order_code);
+          toast("Job created: " + res.order_code);
           render();
         } catch (err) { toast(err.message, true); }
       }
@@ -556,16 +556,16 @@ function renderQuotations(root) {
 // ---------- ĐƠN HÀNG ----------
 function renderOrders(root) {
   root.appendChild(filterBar("orders", {
-    placeholder: "Tìm theo mã, khách hàng…",
-    statusOptions: [{ value: "in_progress", label: "Đang chạy" }, { value: "completed", label: "Hoàn thành" }],
-    typeOptions: [{ value: "fixed", label: "Trọn gói" }, { value: "hourly", label: "Theo giờ" }],
+    placeholder: "Search by code, client…",
+    statusOptions: [{ value: "in_progress", label: "In Progress" }, { value: "completed", label: "Completed" }],
+    typeOptions: [{ value: "fixed", label: "Fixed Price" }, { value: "hourly", label: "Hourly" }],
   }));
 
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Đơn hàng</h2>";
+  card.innerHTML = "<h2>Jobs</h2>";
   if (cache.orders.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có đơn hàng nào — duyệt 1 Báo giá để tạo đơn hàng.</div>";
+    card.innerHTML += "<div class='empty'>No jobs yet — approve a Quote to create one.</div>";
     root.appendChild(card);
     return;
   }
@@ -574,20 +574,20 @@ function renderOrders(root) {
   if (filters.orders.type) list = list.filter(o => o.contract_type === filters.orders.type);
 
   if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy đơn hàng phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No jobs match your filter.</div>";
     root.appendChild(card);
     return;
   }
   const rows = list.map(o => `<tr>
     <td style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}" data-select="${o.order_id}">${o.order_code}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;">${clientName(o.client_id)}</td>
-    <td data-select="${o.order_id}" style="cursor:pointer;">${o.contract_type === "fixed" ? "Trọn gói" : "Theo giờ"}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${o.contract_type === "fixed" ? "Fixed Price" : "Hourly"}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;">${o.start_date || "—"}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;">${o.deadline || "—"}</td>
-    <td data-select="${o.order_id}" style="cursor:pointer;"><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Hoàn thành" : "Đang chạy"}</span></td>
-    <td><button class="ghost" data-edit="${o.order_id}">Sửa</button></td>
+    <td data-select="${o.order_id}" style="cursor:pointer;"><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Completed" : "In Progress"}</span></td>
+    <td><button class="ghost" data-edit="${o.order_id}">Edit</button></td>
   </tr>`).join("");
-  card.innerHTML += `<table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Hình thức</th><th>Bắt đầu</th><th>Deadline</th><th>Trạng thái</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  card.innerHTML += `<table><thead><tr><th>Code</th><th>Client</th><th>Type</th><th>Start Date</th><th>Deadline</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   root.appendChild(card);
   card.querySelector("table").addEventListener("click", (e) => {
     const editId = e.target.getAttribute("data-edit");
@@ -597,14 +597,14 @@ function renderOrders(root) {
   });
 
   if (!selectedOrderId) {
-    root.appendChild(infoNote("👆 Bấm chọn 1 đơn hàng trong bảng trên để nhập chi tiết (giờ làm / tiền công từng nhân viên)."));
+    root.appendChild(infoNote("👆 Select a job above to enter details (hours worked / staff pay)."));
     return;
   }
   const order = cache.orders.find(o => o.order_id === selectedOrderId);
   if (!order) { selectedOrderId = null; return; }
 
   const detailHeader = document.createElement("div");
-  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Chi tiết: ${order.order_code} — ${clientName(order.client_id)}${order.project_name ? " — " + order.project_name : ""}</h1>`;
+  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Job Details: ${order.order_code} — ${clientName(order.client_id)}${order.project_name ? " — " + order.project_name : ""}</h1>`;
   root.appendChild(detailHeader);
 
   // Ô tổng giá trị đã báo giá — dùng chung cho cả 2 loại hợp đồng, để đối chiếu không vượt báo giá
@@ -617,32 +617,32 @@ function renderOrders(root) {
   const budgetCard = document.createElement("div");
   budgetCard.className = "card";
   budgetCard.style.borderColor = overBudget ? "var(--danger)" : "var(--border)";
-  budgetCard.innerHTML = `<h2>Tổng giá trị đã báo giá với Khách hàng</h2>
+  budgetCard.innerHTML = `<h2>Total Quoted Amount</h2>
     <div class="grid">
-      <div><label>Tổng đã báo giá</label><div class="money" style="font-size:16px;font-weight:600;">${aud(quotedTotal)}</div></div>
-      <div><label>${order.contract_type === "hourly" ? "Đã tính vào các Task" : "Đã phân bổ cho Nhân viên"}</label>
+      <div><label>Quoted Amount</label><div class="money" style="font-size:16px;font-weight:600;">${aud(quotedTotal)}</div></div>
+      <div><label>${order.contract_type === "hourly" ? "Allocated to Tasks" : "Allocated to Staff"}</label>
         <div class="money" style="font-size:16px;font-weight:600;${overBudget?'color:var(--danger);':''}">${aud(usedTotal)} (${pct}%)</div></div>
     </div>
-    ${overBudget ? "<div class='badge danger'>⚠️ Đã vượt tổng giá trị báo giá!</div>" : ""}
-    ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Lưu ý từ báo giá:</b> ${order.notes}</div>` : ""}`;
+    ${overBudget ? "<div class='badge danger'>⚠️ Exceeds the quoted amount!</div>" : ""}
+    ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Notes from quote:</b> ${order.notes}</div>` : ""}`;
   root.appendChild(budgetCard);
 
   const editingOrder = editingRecord && editingRecord.table === "orders" && editingRecord.id === order.order_id;
   if (editingOrder) {
-    root.appendChild(formCard("Sửa thông tin đơn hàng", [
-      { key: "order_code", label: "Mã đơn hàng", type: "text", required: true, default: order.order_code },
-      { key: "project_name", label: "Tên dự án", type: "text", default: order.project_name },
-      { key: "total_amount_aud", label: "Tổng giá trị đã báo giá (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
-      { key: "deadline", label: "Deadline bàn giao", type: "date", default: order.deadline },
-      { key: "estimated_hours", label: "Số giờ ước tính (dùng cho công thức nợ xấu)", type: "number", step:"0.25", default: order.estimated_hours },
-      { key: "rate_estimated", label: "Tỷ giá dự kiến (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
-      { key: "status", label: "Trạng thái", type: "select", options: ["in_progress","completed"], labels:{in_progress:"Đang chạy",completed:"Hoàn thành"}, default: order.status },
-      { key: "notes", label: "Lưu ý", type: "textarea", default: order.notes },
+    root.appendChild(formCard("Edit Job Details", [
+      { key: "order_code", label: "Job Code", type: "text", required: true, default: order.order_code },
+      { key: "project_name", label: "Project Name", type: "text", default: order.project_name },
+      { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
+      { key: "deadline", label: "Handover Deadline", type: "date", default: order.deadline },
+      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "number", step:"0.25", default: order.estimated_hours },
+      { key: "rate_estimated", label: "Estimated Exchange Rate (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
+      { key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: order.status },
+      { key: "notes", label: "Notes", type: "textarea", default: order.notes },
     ], async (data) => {
       data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
       await api("/api/orders?id=" + order.order_id, "PUT", data);
-      toast("Đã cập nhật đơn hàng."); editingRecord = null; render();
-    }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
+      toast("Job updated."); editingRecord = null; render();
+    }, null, { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } }));
   }
 
   if (order.contract_type === "fixed") renderFixedOrderDetail(root, order);
@@ -651,34 +651,34 @@ function renderOrders(root) {
 
 function renderFixedOrderDetail(root, order) {
   // Phần 1: Trả lương cố định theo từng nhân viên (dùng để tính thù lao)
-  root.appendChild(formCard("Thêm nhân viên & tiền công cố định", [
-    { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
-    { key: "fixed_amount_aud", label: "Tiền công cố định (AUD)", type: "number", step:"0.01", required: true },
-    { key: "delivered_date", label: "Ngày gửi kết quả", type: "date" },
+  root.appendChild(formCard("Add Staff & Fixed Pay", [
+    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    { key: "fixed_amount_aud", label: "Fixed Pay (AUD)", type: "number", step:"0.01", required: true },
+    { key: "delivered_date", label: "Delivery Date", type: "date" },
   ], async (data) => {
     data.order_id = order.order_id;
     data.fixed_amount_cents = toCents(data.fixed_amount_aud); delete data.fixed_amount_aud;
     data.completed = 0;
     await api("/api/order_staff_payout", "POST", data);
-    toast("Đã thêm."); render();
+    toast("Added."); render();
   }));
 
   const list = cache.order_staff_payout.filter(x => x.order_id === order.order_id);
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách nhân viên & tiền công trong đơn này</h2>";
+  card.innerHTML = "<h2>Staff & Pay for This Job</h2>";
   if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có nhân viên nào.</div>";
+    card.innerHTML += "<div class='empty'>No staff yet.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Tiền công</th><th>Ngày gửi</th><th>Hoàn thành</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Staff</th><th>Pay</th><th>Delivered</th><th>Completed</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(x => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${staffName(x.staff_id)}</td><td class="money">${aud(x.fixed_amount_cents)}</td>
         <td>${x.delivered_date || "—"}</td>
-        <td>${x.completed ? "<span class='badge ok'>Hoàn thành</span>" : "<span class='badge muted'>Đang làm</span>"}</td>
-        <td>${x.completed ? "—" : `<button class="ghost" data-done="${x.id}">Đánh dấu hoàn thành</button>`}</td>`;
+        <td>${x.completed ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
+        <td>${x.completed ? "—" : `<button class="ghost" data-done="${x.id}">Mark Complete</button>`}</td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -687,17 +687,17 @@ function renderFixedOrderDetail(root, order) {
       if (!id) return;
       try {
         await api("/api/order_staff_payout?id=" + id, "PUT", { completed: 1 });
-        toast("Đã đánh dấu hoàn thành.");
+        toast("Marked complete.");
         // Kiểm tra: nếu TẤT CẢ nhân viên trong đơn đã hoàn thành -> tự tạo Hóa đơn nháp
         const res = await api("/api/check-fixed-order-invoice", "POST", { order_id: order.order_id });
-        if (res.created) toast(`Đã tự tạo Hóa đơn nháp ${res.invoice_code} — sang tab Hóa đơn để hoàn tất.`);
+        if (res.created) toast(`Draft invoice ${res.invoice_code} auto-created — go to the Invoices tab to finish it.`);
         render();
       } catch (err) { toast(err.message, true); }
     });
     card.appendChild(tbl);
   }
   root.appendChild(card);
-  root.appendChild(infoNote("Khi TẤT CẢ nhân viên trong đơn được đánh dấu Hoàn thành, hệ thống tự tạo 1 Hóa đơn nháp sang tab Hóa đơn (dùng đúng Tổng giá trị đã báo giá ở trên)."));
+  root.appendChild(infoNote("When ALL staff on this job are marked Complete, the system auto-creates a draft invoice on the Invoices tab (using the Quoted Amount above)."));
 
   // Phần 2: Danh sách nhiệm vụ chung trong dự án (chỉ để theo dõi công việc, không dùng để tính tiền —
   // vì Trọn gói tính theo tiền công cố định ở Phần 1, không tính theo giờ)
@@ -708,19 +708,19 @@ function renderFixedOrderDetail(root, order) {
 function renderTaskTrackerSection(root, order, opts) {
   const showRates = opts && opts.showRates;
   const fields = [
-    { key: "task_name", label: "Tên nhiệm vụ", type: "text", required: true },
-    { key: "staff_id", label: "Nhân viên", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    { key: "task_name", label: "Task Name", type: "text", required: true },
+    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
   ];
   if (showRates) {
     fields.push(
-      { key: "hours", label: "Số giờ làm việc", type: "number", step:"0.25" },
-      { key: "client_rate_aud", label: "Đơn giá charge Khách/giờ (AUD)", type: "number", step:"0.01" },
-      { key: "staff_rate_aud", label: "Đơn giá trả NV/giờ (AUD)", type: "number", step:"0.01" },
+      { key: "hours", label: "Hours Worked", type: "number", step:"0.25" },
+      { key: "client_rate_aud", label: "Client Bill Rate /hr (AUD)", type: "number", step:"0.01" },
+      { key: "staff_rate_aud", label: "Staff Pay Rate /hr (AUD)", type: "number", step:"0.01" },
     );
   } else {
-    fields.push({ key: "hours", label: "Số giờ làm việc (tham khảo, không dùng tính tiền)", type: "number", step:"0.25" });
+    fields.push({ key: "hours", label: "Hours Worked (reference only — not used for billing)", type: "number", step:"0.25" });
   }
-  root.appendChild(formCard("Thêm nhiệm vụ (Task) mới", fields, async (data) => {
+  root.appendChild(formCard("Add New Task", fields, async (data) => {
     data.order_id = order.order_id;
     if (showRates) {
       data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
@@ -730,35 +730,35 @@ function renderTaskTrackerSection(root, order, opts) {
     }
     data.status = "in_progress";
     await api("/api/tasks", "POST", data);
-    toast("Đã thêm nhiệm vụ."); render();
+    toast("Task added."); render();
   }));
 
   const tasks = cache.tasks.filter(t => t.order_id === order.order_id);
   const taskCard = document.createElement("div");
   taskCard.className = "card";
-  taskCard.innerHTML = "<h2>Danh sách nhiệm vụ trong dự án</h2>";
+  taskCard.innerHTML = "<h2>Project Task List</h2>";
   if (tasks.length === 0) {
-    taskCard.innerHTML += "<div class='empty'>Chưa có nhiệm vụ nào.</div>";
+    taskCard.innerHTML += "<div class='empty'>No tasks yet.</div>";
   } else {
     const tbl = document.createElement("table");
-    const rateHeaders = showRates ? "<th>Tiền thu Khách</th><th>Tiền trả NV</th>" : "";
-    tbl.innerHTML = `<thead><tr><th>Nhiệm vụ</th><th>Nhân viên</th><th>Giờ</th>${rateHeaders}<th>Trạng thái</th>${showRates?"<th>Kỳ chốt</th>":""}<th></th></tr></thead>`;
+    const rateHeaders = showRates ? "<th>Client Amount</th><th>Staff Amount</th>" : "";
+    tbl.innerHTML = `<thead><tr><th>Task</th><th>Staff</th><th>Hours</th>${rateHeaders}<th>Status</th>${showRates?"<th>Progress Claim</th>":""}<th></th></tr></thead>`;
     const tbody = document.createElement("tbody");
     tasks.forEach(t => {
       const tr = document.createElement("tr");
       const rateCells = showRates ? `<td class="money">${aud(Math.round((t.hours||0)*t.client_rate_cents))}</td><td class="money">${aud(Math.round((t.hours||0)*t.staff_rate_cents))}</td>` : "";
-      const cycleCell = showRates ? `<td>${t.billing_cycle_id ? "<span class='badge muted'>Đã chốt #"+t.billing_cycle_id+"</span>" : "—"}</td>` : "";
+      const cycleCell = showRates ? `<td>${t.billing_cycle_id ? "<span class='badge muted'>Claimed #"+t.billing_cycle_id+"</span>" : "—"}</td>` : "";
       tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours ?? "—"}</td>${rateCells}
-        <td>${t.status === "completed" ? "<span class='badge ok'>Hoàn thành</span>" : "<span class='badge muted'>Đang làm</span>"}</td>
+        <td>${t.status === "completed" ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
         ${cycleCell}
-        <td>${t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Đánh dấu hoàn thành</button>` : "—"}</td>`;
+        <td>${t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Mark Complete</button>` : "—"}</td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
     tbl.addEventListener("click", async (e) => {
       const id = e.target.getAttribute("data-donetask");
       if (!id) return;
-      try { await api("/api/tasks?id=" + id, "PUT", { status: "completed" }); toast("Đã đánh dấu hoàn thành."); render(); }
+      try { await api("/api/tasks?id=" + id, "PUT", { status: "completed" }); toast("Marked complete."); render(); }
       catch (err) { toast(err.message, true); }
     });
     taskCard.appendChild(tbl);
@@ -771,20 +771,20 @@ function renderHourlyOrderDetail(root, order) {
 
   const closeCard = document.createElement("div");
   closeCard.className = "card";
-  closeCard.innerHTML = `<h2>Chốt kỳ Billing</h2>
+  closeCard.innerHTML = `<h2>Progress Claim</h2>
     <div class="grid">
-      <div><label>Từ ngày</label><input type="date" id="cycle-from"></div>
-      <div><label>Đến ngày</label><input type="date" id="cycle-to" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div><label>From</label><input type="date" id="cycle-from"></div>
+      <div><label>To</label><input type="date" id="cycle-to" value="${new Date().toISOString().slice(0,10)}"></div>
     </div>
-    <button class="primary" id="close-cycle-btn">Chốt kỳ (gom Task đã Hoàn thành, chưa chốt)</button>`;
+    <button class="primary" id="close-cycle-btn">Submit Progress Claim (collects completed, unclaimed tasks)</button>`;
   root.appendChild(closeCard);
   closeCard.querySelector("#close-cycle-btn").addEventListener("click", async () => {
     const period_start = document.getElementById("cycle-from").value;
     const period_end = document.getElementById("cycle-to").value;
-    if (!period_start || !period_end) { toast("Chọn đủ khoảng thời gian.", true); return; }
+    if (!period_start || !period_end) { toast("Please select a date range.", true); return; }
     try {
       const res = await api("/api/close-billing-cycle", "POST", { order_id: order.order_id, period_start, period_end });
-      toast(`Đã chốt kỳ #${res.cycle_id} — ${res.task_count} task, và TỰ TẠO Hóa đơn nháp ${res.invoice_code} sang tab Hóa đơn.`);
+      toast(`Progress Claim #${res.cycle_id} submitted — ${res.task_count} task(s), draft invoice ${res.invoice_code} auto-created.`);
       render();
     } catch (err) { toast(err.message, true); }
   });
@@ -792,20 +792,20 @@ function renderHourlyOrderDetail(root, order) {
   const cycles = cache.billing_cycles.filter(c => c.order_id === order.order_id);
   const cyclesCard = document.createElement("div");
   cyclesCard.className = "card";
-  cyclesCard.innerHTML = "<h2>Lịch sử chốt kỳ</h2>";
+  cyclesCard.innerHTML = "<h2>Progress Claim History</h2>";
   if (cycles.length === 0) {
-    cyclesCard.innerHTML += "<div class='empty'>Chưa chốt kỳ nào.</div>";
+    cyclesCard.innerHTML += "<div class='empty'>No progress claims yet.</div>";
   } else {
     const rows = cycles.map(c => `<tr>
       <td>#${c.cycle_id}</td><td>${c.period_start} → ${c.period_end}</td>
       <td class="money">${aud(c.total_client_amount_cents)}</td>
       <td class="money">${aud(c.total_staff_amount_cents)}</td>
-      <td>${c.invoice_id ? "<span class='badge ok'>Đã tạo hóa đơn #"+c.invoice_id+"</span>" : "<span class='badge warn'>Chưa có hóa đơn</span>"}</td>
+      <td>${c.invoice_id ? "<span class='badge ok'>Invoice #"+c.invoice_id+" created</span>" : "<span class='badge warn'>No invoice yet</span>"}</td>
     </tr>`).join("");
-    cyclesCard.innerHTML += `<table><thead><tr><th>Kỳ</th><th>Khoảng thời gian</th><th>Thu Khách</th><th>Trả NV</th><th>Hóa đơn</th></tr></thead><tbody>${rows}</tbody></table>`;
+    cyclesCard.innerHTML += `<table><thead><tr><th>Claim #</th><th>Period</th><th>Client Amount</th><th>Staff Amount</th><th>Invoice</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(cyclesCard);
-  root.appendChild(infoNote("Mỗi lần Chốt kỳ, hệ thống tự sinh 1 Hóa đơn nháp bên tab Hóa đơn — bạn chỉ cần sang đó kiểm tra, điền Ngày gửi, rồi Xuất PDF gửi Khách."));
+  root.appendChild(infoNote("Each time you submit a Progress Claim, the system auto-generates a draft invoice on the Invoices tab — just review it, set the Sent Date, and export the PDF to send to your client."));
 }
 
 // ---------- HÓA ĐƠN ----------
@@ -813,33 +813,33 @@ function renderInvoices(root) {
   const editing = editingRecord && editingRecord.table === "invoices" ? cache.invoices.find(i => i.invoice_id === editingRecord.id) : null;
 
   if (!editing) {
-    root.appendChild(infoNote("ℹ️ Hóa đơn không tạo thủ công ở đây nữa — tự động sinh khi bạn 'Chốt kỳ Billing' (Loại B) hoặc khi đánh dấu Hoàn thành hết nhân viên trong đơn (Loại A), ở tab Đơn hàng. Bạn chỉ cần kiểm tra, bổ sung Ngày gửi, rồi Xuất PDF gửi Khách."));
+    root.appendChild(infoNote("ℹ️ Invoices are no longer created manually here — they're auto-generated when you submit a Progress Claim (Hourly jobs) or mark all staff Complete (Fixed Price jobs) on the Jobs tab. Just review, set the Sent Date, and export the PDF."));
   } else {
-    root.appendChild(warnCard("Đang sửa hóa đơn đã tạo. Nếu bạn đổi Trạng thái sang 'Đã thu tiền' ở đây, hệ thống vẫn sẽ TỰ SINH Thù lao NV tương ứng y như bấm nút 'Đánh dấu đã thu tiền'."));
-    root.appendChild(formCard("Sửa hóa đơn: " + editing.invoice_code, [
-      { key: "invoice_code", label: "Mã hóa đơn", type: "text", required: true, default: editing.invoice_code },
-      { key: "base_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01", default: fromCents(editing.base_amount_cents) },
-      { key: "transfer_fee_aud", label: "Phí chuyển tiền bổ sung (AUD)", type: "number", step:"0.01", default: fromCents(editing.transfer_fee_cents) },
-      { key: "sent_date", label: "Ngày gửi hóa đơn cho khách", type: "date", default: editing.sent_date },
-      { key: "due_date", label: "Hạn thanh toán (theo hợp đồng)", type: "date", default: editing.due_date },
-      { key: "paid_date", label: "Ngày nhận tiền thực tế", type: "date", default: editing.paid_date },
-      { key: "status", label: "Trạng thái", type: "select", options: ["delivered_pending","sent_within_terms","overdue","paid"],
-        labels:{delivered_pending:"Đã bàn giao chờ HĐ",sent_within_terms:"Đã gửi trong hạn",overdue:"Quá hạn",paid:"Đã thu tiền"}, default: editing.status },
+    root.appendChild(warnCard("Editing an existing invoice. If you change the Status to 'Paid' here, the system will still auto-generate the matching Staff Payout, just like using the 'Mark as Paid' button."));
+    root.appendChild(formCard("Edit Invoice: " + editing.invoice_code, [
+      { key: "invoice_code", label: "Invoice Code", type: "text", required: true, default: editing.invoice_code },
+      { key: "base_amount_aud", label: "Subtotal (AUD)", type: "number", step:"0.01", default: fromCents(editing.base_amount_cents) },
+      { key: "transfer_fee_aud", label: "Additional Transfer Fee (AUD)", type: "number", step:"0.01", default: fromCents(editing.transfer_fee_cents) },
+      { key: "sent_date", label: "Sent Date", type: "date", default: editing.sent_date },
+      { key: "due_date", label: "Due Date", type: "date", default: editing.due_date },
+      { key: "paid_date", label: "Payment Received Date", type: "date", default: editing.paid_date },
+      { key: "status", label: "Status", type: "select", options: ["delivered_pending","sent_within_terms","overdue","paid"],
+        labels:{delivered_pending:"Draft (Pending)",sent_within_terms:"Sent (Current)",overdue:"Overdue",paid:"Paid"}, default: editing.status },
     ], async (data) => {
       data.base_amount_cents = toCents(data.base_amount_aud); delete data.base_amount_aud;
       data.transfer_fee_cents = toCents(data.transfer_fee_aud); delete data.transfer_fee_aud;
       data.total_amount_cents = data.base_amount_cents + data.transfer_fee_cents;
       await api("/api/invoices?id=" + editing.invoice_id, "PUT", data);
-      toast("Đã cập nhật hóa đơn."); editingRecord = null; render();
-    }, [{ key: "reminder_sent", label: "Đã gửi nhắc nợ ngày thứ 7", checked: editing.reminder_sent }],
-    { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } }));
+      toast("Invoice updated."); editingRecord = null; render();
+    }, [{ key: "reminder_sent", label: "Day-7 reminder sent", checked: editing.reminder_sent }],
+    { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } }));
   }
 
   root.appendChild(filterBar("invoices", {
-    placeholder: "Tìm theo mã hóa đơn, khách hàng…",
+    placeholder: "Search by invoice code, client…",
     statusOptions: [
-      { value: "delivered_pending", label: "Chờ xuất HĐ" }, { value: "sent_within_terms", label: "Trong hạn" },
-      { value: "overdue", label: "Quá hạn" }, { value: "paid", label: "Đã thu tiền" },
+      { value: "delivered_pending", label: "Pending" }, { value: "sent_within_terms", label: "Current" },
+      { value: "overdue", label: "Overdue" }, { value: "paid", label: "Paid" },
     ],
   }));
 
@@ -848,28 +848,28 @@ function renderInvoices(root) {
 
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Danh sách hóa đơn</h2>";
+  card.innerHTML = "<h2>Invoice List</h2>";
   if (cache.invoices.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có hóa đơn nào — sẽ tự sinh khi bạn Chốt kỳ (tab Đơn hàng).</div>";
+    card.innerHTML += "<div class='empty'>No invoices yet — created automatically when you submit a Progress Claim (Jobs tab).</div>";
   } else if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy hóa đơn phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No invoices match your filter.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Mã</th><th>Khách hàng</th><th>Tổng tiền</th><th>Ngày gửi</th><th>Hạn TT</th><th>Trạng thái</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Code</th><th>Client</th><th>Total</th><th>Sent</th><th>Due</th><th>Status</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(i => {
       const tr = document.createElement("tr");
       let statusBadge;
-      if (i.status === "paid") statusBadge = "<span class='badge ok'>Đã thu tiền</span>";
-      else if (i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10))) statusBadge = "<span class='badge danger'>Quá hạn</span>";
-      else statusBadge = "<span class='badge muted'>Trong hạn</span>";
+      if (i.status === "paid") statusBadge = "<span class='badge ok'>Paid</span>";
+      else if (i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10))) statusBadge = "<span class='badge danger'>Overdue</span>";
+      else statusBadge = "<span class='badge muted'>Current</span>";
       const d = daysBetween(i.sent_date);
-      const remindBadge = (!i.reminder_sent && d !== null && d >= 7 && i.status !== "paid") ? " <span class='badge warn'>Cần nhắc nợ</span>" : "";
-      const payBtn = i.status !== "paid" ? `<button class="ghost" data-pay="${i.invoice_id}">Đánh dấu đã thu tiền</button>` : "";
+      const remindBadge = (!i.reminder_sent && d !== null && d >= 7 && i.status !== "paid") ? " <span class='badge warn'>Reminder Due</span>" : "";
+      const payBtn = i.status !== "paid" ? `<button class="ghost" data-pay="${i.invoice_id}">Mark as Paid</button>` : "";
       tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
         <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date || "—"}</td><td>${i.due_date || "—"}</td>
         <td>${statusBadge}${remindBadge}</td>
-        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Sửa</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Xuất PDF</button></td>`;
+        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Edit</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Export PDF</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -880,13 +880,13 @@ function renderInvoices(root) {
       if (payId) {
         try {
           await api("/api/invoices?id=" + payId, "PUT", { status: "paid", paid_date: new Date().toISOString().slice(0,10) });
-          toast("Đã đánh dấu đã thu tiền. Payout tương ứng sẽ tự sinh ở tab Thù lao NV.");
+          toast("Marked as paid. The matching payout will be auto-created on the Staff Payouts tab.");
           render();
         } catch (err) { toast(err.message, true); }
       }
       if (editId) { editingRecord = { table: "invoices", id: parseInt(editId) }; render(); }
       if (pdfId) {
-        try { toast("Đang tạo PDF…"); await exportInvoicePDF(parseInt(pdfId)); }
+        try { toast("Generating PDF…"); await exportInvoicePDF(parseInt(pdfId)); }
         catch (err) { toast(err.message, true); }
       }
     });
@@ -895,99 +895,126 @@ function renderInvoices(root) {
   root.appendChild(card);
 }
 
+// Thông tin cố định — chỉnh trực tiếp ở đây nếu cần thay đổi sau này
+const SENDER_INFO = {
+  name: "VO THI KIEU QUYEN",
+  address: "278 An Tho, An Thanh Thuy Commune, Dong Thap 870000, Vietnam",
+  phone: "(+84)395 661 667",
+  email: "mei.vo.1319@gmail.com",
+};
+const BANK_INFO = {
+  accountHolder: "VO THI KIEU QUYEN",
+  bankName: "Tien Phong Commercial Joint Stock Bank (TPBank)",
+  bankAddress: "57 Ly Thuong Kiet, Hoan Kiem District, Hanoi, Vietnam",
+  accountNumber: "10001017376",
+  swift: "TPBVVNVX",
+  branch: "TBBANK QUAN 4",
+  currency: "AUD",
+};
+const NOTES_TEXT = [
+  "Thank you for your business.",
+  "Please make payment by the due date.",
+  "If you have any questions regarding this invoice, please feel free to contact me.",
+];
+
 async function exportInvoicePDF(invoiceId) {
   const d = await api("/api/invoice-detail?id=" + invoiceId);
   const inv = d.invoice;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
 
-  const L = 14, R = 196; // lề trái / lề phải (mm)
+  const L = 14, R = 196;
+  const LABEL_X = L, VALUE_X = 45;
+  let y = 20;
 
-  // ---- Header ----
-  doc.setFont("helvetica", "bold"); doc.setFontSize(20);
-  doc.text("ECOFREE", L, 22);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(90);
-  doc.text("Freelance Design & Drafting Team", L, 27);
-  doc.setTextColor(0);
+  function row(label, value, opts) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(0);
+    doc.text(label, LABEL_X, y);
+    doc.setFont("helvetica", (opts && opts.boldValue) ? "bold" : "normal");
+    doc.text(String(value ?? "-"), VALUE_X, y);
+    y += 5.5;
+  }
+  function sectionHeader(title) {
+    y += 3;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(0);
+    doc.text(title, L, y);
+    y += 6;
+  }
 
-  doc.setFont("helvetica", "bold"); doc.setFontSize(22);
-  doc.text("INVOICE", R, 22, { align: "right" });
+  // ---- Title ----
+  doc.setFont("helvetica", "bold"); doc.setFontSize(24);
+  doc.text("INVOICE", L, y); y += 10;
 
-  doc.setDrawColor(180); doc.setLineWidth(0.3);
-  doc.line(L, 32, R, 32);
+  row("Invoice No.", inv.invoice_code);
+  row("Invoice Date", inv.sent_date || "-");
+  row("Due Date", inv.due_date || "-");
 
-  // ---- Bill To (trái) / Invoice meta (phải) ----
-  let y = 40;
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(120);
-  doc.text("BILL TO", L, y);
-  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(0);
-  doc.text(d.client_name || "-", L, y + 6);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-  doc.text(d.client_email || "-", L, y + 12);
+  // ---- From (thông tin cố định của người gửi) ----
+  sectionHeader("From");
+  row("Name", SENDER_INFO.name);
+  row("Address", SENDER_INFO.address);
+  row("Phone", SENDER_INFO.phone);
+  row("Email", SENDER_INFO.email);
 
-  const metaRows = [
-    ["Invoice #", inv.invoice_code],
-    ["Invoice Date", inv.sent_date || "-"],
-    ["Due Date", inv.due_date || "-"],
-    ["Project", d.project_name || "-"],
-  ];
-  doc.setFontSize(10);
-  metaRows.forEach((row, i) => {
-    doc.setFont("helvetica", "normal"); doc.setTextColor(120);
-    doc.text(row[0], 140, y + i * 6, { align: "left" });
-    doc.setFont("helvetica", "bold"); doc.setTextColor(0);
-    doc.text(String(row[1]), R, y + i * 6, { align: "right" });
-  });
+  // ---- Bill to (khách hàng) ----
+  sectionHeader("Bill to");
+  row("Company", d.client_name);
+  row("Email", d.client_email);
+  if (d.project_name) row("Project", d.project_name);
 
-  // ---- Bảng công việc ----
-  y = 68;
+  // ---- Bảng công việc: No | Description | Hour | Price($) | Amount($) ----
+  y += 4;
+  const colNo = L, colDesc = L + 10, colHour = 130, colPrice = 158, colAmount = R;
   doc.setFillColor(240, 240, 240);
-  doc.rect(L, y, R - L, 8, "F");
+  doc.rect(L, y - 5, R - L, 7.5, "F");
   doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(60);
-  doc.text("DESCRIPTION", L + 2, y + 5.5);
-  doc.text("HOURS", 140, y + 5.5, { align: "right" });
-  doc.text("RATE", 165, y + 5.5, { align: "right" });
-  doc.text("AMOUNT", R - 2, y + 5.5, { align: "right" });
-  y += 8;
+  doc.text("No", colNo, y);
+  doc.text("Description", colDesc, y);
+  doc.text("Hour", colHour, y, { align: "right" });
+  doc.text("Price($)", colPrice, y, { align: "right" });
+  doc.text("Amount($)", colAmount, y, { align: "right" });
+  y += 7;
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(0);
-  d.line_items.forEach((li) => {
-    doc.setDrawColor(230); doc.line(L, y + 6, R, y + 6);
+  d.line_items.forEach((li, idx) => {
     const name = String(li.task_name || "-");
-    doc.text(name.length > 55 ? name.slice(0, 52) + "..." : name, L + 2, y + 4.2);
-    doc.text(li.hours !== null && li.hours !== undefined ? String(li.hours) : "-", 140, y + 4.2, { align: "right" });
-    doc.text(li.rate_cents !== null && li.rate_cents !== undefined ? aud(li.rate_cents) : "-", 165, y + 4.2, { align: "right" });
-    doc.text(aud(li.amount_cents), R - 2, y + 4.2, { align: "right" });
-    y += 7;
+    doc.text(String(idx + 1), colNo, y);
+    doc.text(name.length > 45 ? name.slice(0, 42) + "..." : name, colDesc, y);
+    doc.text(li.hours !== null && li.hours !== undefined ? String(li.hours) : "-", colHour, y, { align: "right" });
+    doc.text(li.rate_cents !== null && li.rate_cents !== undefined ? "$" + (li.rate_cents/100).toFixed(2) : "-", colPrice, y, { align: "right" });
+    doc.text("$" + (li.amount_cents/100).toFixed(2), colAmount, y, { align: "right" });
+    y += 6.5;
   });
 
-  y += 4;
+  // Phí chuyển đổi (chỉ hiện nếu > 0, theo đúng logic Khách hàng chịu phí)
+  if (inv.transfer_fee_cents > 0) {
+    doc.text("Transfer Fee (5%)", colDesc, y);
+    doc.text("$" + (inv.transfer_fee_cents/100).toFixed(2), colAmount, y, { align: "right" });
+    y += 6.5;
+  }
 
-  // ---- Totals (căn phải, không bao giờ chồng chữ vì dùng align:'right' đúng chuẩn) ----
-  const totalsX1 = 140, totalsX2 = R - 2;
-  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(90);
-  doc.text("Subtotal", totalsX1, y, { align: "left" });
-  doc.setTextColor(0);
-  doc.text(aud(inv.base_amount_cents), totalsX2, y, { align: "right" });
-  y += 6;
-
-  doc.setTextColor(90);
-  doc.text("Transfer Fee (5%)", totalsX1, y, { align: "left" });
-  doc.setTextColor(0);
-  doc.text(aud(inv.transfer_fee_cents), totalsX2, y, { align: "right" });
-  y += 3;
-
-  doc.setDrawColor(0); doc.setLineWidth(0.4);
-  doc.line(totalsX1, y, R, y);
-  y += 6;
+  doc.setDrawColor(0); doc.setLineWidth(0.3);
+  doc.line(L, y, R, y); y += 7;
 
   doc.setFont("helvetica", "bold"); doc.setFontSize(12);
-  doc.text("TOTAL DUE", totalsX1, y, { align: "left" });
-  doc.text(aud(inv.total_amount_cents), totalsX2, y, { align: "right" });
+  doc.text("Total Amount", colDesc, y);
+  doc.text("$" + (inv.total_amount_cents/100).toFixed(2), colAmount, y, { align: "right" });
+  y += 12;
 
-  // ---- Footer ----
-  doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); doc.setTextColor(140);
-  doc.text("Thank you for your business.", 105, 280, { align: "center" });
+  // ---- Bank deposit (thông tin cố định) ----
+  sectionHeader("Bank deposit");
+  row("Account Holder Name", BANK_INFO.accountHolder);
+  row("Bank Name", BANK_INFO.bankName);
+  row("Bank Address", BANK_INFO.bankAddress);
+  row("Account Number", BANK_INFO.accountNumber);
+  row("SWIFT/BIC Code", BANK_INFO.swift);
+  row("Branch Name", BANK_INFO.branch);
+  row("Preferred Currency", BANK_INFO.currency);
+
+  // ---- Notes (cố định) ----
+  sectionHeader("Notes");
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+  NOTES_TEXT.forEach((line) => { doc.text(line, L, y); y += 5; });
 
   doc.save(`${inv.invoice_code}.pdf`);
 }
@@ -996,16 +1023,16 @@ async function exportInvoicePDF(invoiceId) {
 function renderPayouts(root) {
   const editing = editingRecord && editingRecord.table === "payouts" ? cache.payouts.find(p => p.payout_id === editingRecord.id) : null;
   if (editing) {
-    root.appendChild(warnCard(`Đang sửa Thù lao của <b>${staffName(editing.staff_id)}</b> — Đơn hàng ${orderLabel(editing.order_id)}. Chỉnh sửa số tiền tại đây sẽ GHI ĐÈ số tự tính, hãy kiểm tra kỹ trước khi Cập nhật.`));
-    const editCard = formCard("Sửa thù lao nhân viên", [
-      { key: "gross_amount_aud", label: "Số tiền gốc (AUD)", type: "number", step:"0.01", default: fromCents(editing.gross_amount_cents) },
-      { key: "management_fee_aud", label: "Phí quản lý (AUD)", type: "number", step:"0.01", default: fromCents(editing.management_fee_cents) },
-      { key: "tax_withheld_aud", label: "Thuế giữ 7% (AUD)", type: "number", step:"0.01", default: fromCents(editing.tax_withheld_cents) },
-      { key: "net_amount_aud", label: "Số tiền NV thực nhận (AUD)", type: "number", step:"0.01", required: true, default: fromCents(editing.net_amount_cents) },
-      { key: "rate_payout", label: "Tỷ giá áp dụng (AUD/VND)", type: "number", step:"0.01", default: editing.rate_payout },
-      { key: "payout_date", label: "Ngày chi trả", type: "date", default: editing.payout_date },
-      { key: "status", label: "Trạng thái", type: "select", options: ["pending_approval","approved","paid"],
-        labels:{pending_approval:"Chờ duyệt",approved:"Đã duyệt",paid:"Đã chi"}, default: editing.status },
+    root.appendChild(warnCard(`Editing the payout for <b>${staffName(editing.staff_id)}</b> — Job ${orderLabel(editing.order_id)}. Changing the amounts here will OVERRIDE the auto-calculated figures — please double-check before updating.`));
+    const editCard = formCard("Edit Staff Payout", [
+      { key: "gross_amount_aud", label: "Gross Amount (AUD)", type: "number", step:"0.01", default: fromCents(editing.gross_amount_cents) },
+      { key: "management_fee_aud", label: "Management Fee (AUD)", type: "number", step:"0.01", default: fromCents(editing.management_fee_cents) },
+      { key: "tax_withheld_aud", label: "Tax Withheld 7% (AUD)", type: "number", step:"0.01", default: fromCents(editing.tax_withheld_cents) },
+      { key: "net_amount_aud", label: "Net Pay to Staff (AUD)", type: "number", step:"0.01", required: true, default: fromCents(editing.net_amount_cents) },
+      { key: "rate_payout", label: "Exchange Rate Applied (AUD/VND)", type: "number", step:"0.01", default: editing.rate_payout },
+      { key: "payout_date", label: "Payment Date", type: "date", default: editing.payout_date },
+      { key: "status", label: "Status", type: "select", options: ["pending_approval","approved","paid"],
+        labels:{pending_approval:"Pending Approval",approved:"Approved",paid:"Paid"}, default: editing.status },
     ], async (data) => {
       data.gross_amount_cents = toCents(data.gross_amount_aud); delete data.gross_amount_aud;
       data.management_fee_cents = toCents(data.management_fee_aud); delete data.management_fee_aud;
@@ -1013,8 +1040,8 @@ function renderPayouts(root) {
       data.net_amount_cents = toCents(data.net_amount_aud); delete data.net_amount_aud;
       if (data.rate_payout) data.net_amount_vnd = Math.round((data.net_amount_cents / 100) * parseFloat(data.rate_payout));
       await api("/api/payouts?id=" + editing.payout_id, "PUT", data);
-      toast("Đã cập nhật thù lao."); editingRecord = null; render();
-    }, null, { editing: true, submitLabel: "Cập nhật", onCancel: () => { editingRecord = null; render(); } });
+      toast("Payout updated."); editingRecord = null; render();
+    }, null, { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } });
     root.appendChild(editCard);
 
     // Ô hiển thị số tiền quy đổi VND, tự cập nhật theo Số tiền thực nhận (AUD) x Tỷ giá
@@ -1026,7 +1053,7 @@ function renderPayouts(root) {
       const netAud = parseFloat(netInput.value) || 0;
       const rate = parseFloat(rateInput.value) || 0;
       const vnd = Math.round(netAud * rate);
-      vndBox.innerHTML = `<label style="margin-bottom:2px;">Số tiền quy đổi VND (chi trả cho NV)</label>
+      vndBox.innerHTML = `<label style="margin-bottom:2px;">Converted Amount (VND) — for staff payment</label>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--accent);">${formatVND(vnd)}</div>`;
     }
     netInput.addEventListener("input", updateVndBox);
@@ -1036,9 +1063,9 @@ function renderPayouts(root) {
   }
 
   root.appendChild(filterBar("payouts", {
-    placeholder: "Tìm theo tên nhân viên, mã đơn hàng…",
+    placeholder: "Search by staff name, job code…",
     statusOptions: [
-      { value: "pending_approval", label: "Chờ duyệt" }, { value: "approved", label: "Đã duyệt" }, { value: "paid", label: "Đã chi" },
+      { value: "pending_approval", label: "Pending" }, { value: "approved", label: "Approved" }, { value: "paid", label: "Paid" },
     ],
   }));
 
@@ -1047,25 +1074,25 @@ function renderPayouts(root) {
 
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Thù lao nhân viên</h2>";
+  card.innerHTML = "<h2>Staff Payouts</h2>";
   if (cache.payouts.length === 0) {
-    card.innerHTML += "<div class='empty'>Chưa có khoản thù lao nào. Payout tự sinh khi Hóa đơn được đánh dấu 'Đã thu tiền'.</div>";
+    card.innerHTML += "<div class='empty'>No payouts yet. Payouts are created automatically when an invoice is marked 'Paid'.</div>";
   } else if (list.length === 0) {
-    card.innerHTML += "<div class='empty'>Không tìm thấy khoản thù lao phù hợp bộ lọc.</div>";
+    card.innerHTML += "<div class='empty'>No payouts match your filter.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Nhân viên</th><th>Đơn hàng</th><th>Gốc</th><th>Phí QL</th><th>Thuế 7%</th><th>Thực nhận</th><th>Quy đổi VND</th><th>Trạng thái</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Staff</th><th>Job</th><th>Gross</th><th>Mgmt Fee</th><th>Tax 7%</th><th>Net Pay</th><th>VND Amount</th><th>Status</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(p => {
       const tr = document.createElement("tr");
-      const statusBadge = p.status === "paid" ? "<span class='badge ok'>Đã chi</span>" : p.status === "approved" ? "<span class='badge muted'>Đã duyệt</span>" : "<span class='badge warn'>Chờ duyệt</span>";
+      const statusBadge = p.status === "paid" ? "<span class='badge ok'>Paid</span>" : p.status === "approved" ? "<span class='badge muted'>Approved</span>" : "<span class='badge warn'>Pending</span>";
       let actions = "";
       if (p.net_amount_cents === null || p.net_amount_cents === undefined || p.net_amount_cents === 0) {
-        actions += `<button class="ghost" data-calc="${p.payout_id}">Tính toán</button> `;
+        actions += `<button class="ghost" data-calc="${p.payout_id}">Calculate</button> `;
       }
-      if (p.status === "pending_approval") actions += `<button class="primary" data-approve="${p.payout_id}">Duyệt</button> `;
-      if (p.status === "approved") actions += `<button class="ghost" data-pay="${p.payout_id}">Đánh dấu đã chi</button> `;
-      actions += `<button class="ghost" data-edit="${p.payout_id}">Sửa</button>`;
+      if (p.status === "pending_approval") actions += `<button class="primary" data-approve="${p.payout_id}">Approve</button> `;
+      if (p.status === "approved") actions += `<button class="ghost" data-pay="${p.payout_id}">Mark as Paid</button> `;
+      actions += `<button class="ghost" data-edit="${p.payout_id}">Edit</button>`;
       tr.innerHTML = `<td>${staffName(p.staff_id)}</td><td>${orderLabel(p.order_id)}</td>
         <td class="money">${aud(p.gross_amount_cents)}</td>
         <td class="money">${aud(p.management_fee_cents)}</td>
@@ -1082,16 +1109,16 @@ function renderPayouts(root) {
       const payId = e.target.getAttribute("data-pay");
       const editId = e.target.getAttribute("data-edit");
       try {
-        if (calcId) { await api("/api/calc-payout", "POST", { payout_id: parseInt(calcId) }); toast("Đã tính xong, kiểm tra lại số liệu trước khi duyệt."); render(); }
-        if (approveId) { await api("/api/payouts?id=" + approveId, "PUT", { status: "approved" }); toast("Đã duyệt."); render(); }
-        if (payId) { await api("/api/payouts?id=" + payId, "PUT", { status: "paid", payout_date: new Date().toISOString().slice(0,10) }); toast("Đã đánh dấu chi trả."); render(); }
+        if (calcId) { await api("/api/calc-payout", "POST", { payout_id: parseInt(calcId) }); toast("Calculation complete — please review before approving."); render(); }
+        if (approveId) { await api("/api/payouts?id=" + approveId, "PUT", { status: "approved" }); toast("Approved."); render(); }
+        if (payId) { await api("/api/payouts?id=" + payId, "PUT", { status: "paid", payout_date: new Date().toISOString().slice(0,10) }); toast("Marked as paid."); render(); }
         if (editId) { editingRecord = { table: "payouts", id: parseInt(editId) }; render(); }
       } catch (err) { toast(err.message, true); }
     });
     card.appendChild(tbl);
   }
   root.appendChild(card);
-  root.appendChild(infoNote("Số tiền hiển thị là gợi ý theo công thức đã thống nhất — bạn nên kiểm tra lại trước khi bấm Duyệt, vì đây là dữ liệu tài chính thật. Có thể bấm 'Sửa' để chỉnh tay nếu công thức tự động chưa đúng thực tế."));
+  root.appendChild(infoNote("Amounts shown are suggestions based on the agreed formula — please verify before approving, as this is real financial data. Use 'Edit' to adjust manually if the auto-calculation doesn't match reality."));
 }
 
 // ---------- BÁO CÁO ----------
@@ -1102,16 +1129,16 @@ function firstDayOfMonth() {
 async function renderReports(root) {
   const card = document.createElement("div");
   card.className = "card";
-  card.innerHTML = "<h2>Bộ lọc thời gian</h2>";
+  card.innerHTML = "<h2>Date Filter</h2>";
   const filterRow = document.createElement("div");
   filterRow.className = "grid";
   filterRow.innerHTML = `
-    <div><label>Từ ngày</label><input type="date" id="rep-from" value="${firstDayOfMonth()}"></div>
-    <div><label>Đến ngày</label><input type="date" id="rep-to" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div><label>From</label><input type="date" id="rep-from" value="${firstDayOfMonth()}"></div>
+    <div><label>To</label><input type="date" id="rep-to" value="${new Date().toISOString().slice(0,10)}"></div>
   `;
   card.appendChild(filterRow);
   const btn = document.createElement("button");
-  btn.className = "primary"; btn.textContent = "Xem báo cáo";
+  btn.className = "primary"; btn.textContent = "View Report";
   card.appendChild(btn);
   root.appendChild(card);
 
@@ -1121,36 +1148,36 @@ async function renderReports(root) {
   async function loadReport() {
     const from = document.getElementById("rep-from").value;
     const to = document.getElementById("rep-to").value;
-    resultZone.innerHTML = "<div class='empty'>Đang tính…</div>";
+    resultZone.innerHTML = "<div class='empty'>Calculating…</div>";
     try {
       const r = await api(`/api/report?from=${from}&to=${to}`);
       resultZone.innerHTML = "";
 
       const c1 = document.createElement("div");
       c1.className = "card";
-      c1.innerHTML = `<h2>💰 Dòng tiền thực nhận (${from} → ${to})</h2>
+      c1.innerHTML = `<h2>💰 Net Cash Flow (${from} → ${to})</h2>
         <table>
           <tbody>
-            <tr><td>Doanh thu thực nhận từ Khách hàng</td><td class="money">${aud(r.revenue_received_cents)}</td></tr>
-            <tr><td>Phí Quản lý Ecofree giữ lại</td><td class="money">${aud(r.management_fee_cents)}</td></tr>
-            <tr><td>Tổng chi phí thù lao đã trả Nhân viên</td><td class="money">${aud(r.staff_paid_cents)}</td></tr>
-            <tr><td>Quỹ Thuế 7% đã trích giữ (giữ hộ NV)</td><td class="money">${aud(r.tax_fund_cents)}</td></tr>
-            <tr><td><b>Dòng tiền ròng tích lũy của May</b></td><td class="money"><b>${aud(r.net_cashflow_cents)}</b></td></tr>
+            <tr><td>Revenue Received from Clients</td><td class="money">${aud(r.revenue_received_cents)}</td></tr>
+            <tr><td>Ecofree Management Fee Retained</td><td class="money">${aud(r.management_fee_cents)}</td></tr>
+            <tr><td>Total Staff Payouts Paid</td><td class="money">${aud(r.staff_paid_cents)}</td></tr>
+            <tr><td>7% Tax Fund Withheld (held for staff)</td><td class="money">${aud(r.tax_fund_cents)}</td></tr>
+            <tr><td><b>May's Net Accumulated Cash Flow</b></td><td class="money"><b>${aud(r.net_cashflow_cents)}</b></td></tr>
           </tbody>
         </table>`;
       resultZone.appendChild(c1);
 
       const c2 = document.createElement("div");
       c2.className = "card";
-      c2.innerHTML = "<h2>⚠️ Rủi ro nợ xấu</h2>";
+      c2.innerHTML = "<h2>⚠️ Bad Debt Risk</h2>";
       if (r.bad_debt_list.length === 0) {
-        c2.innerHTML += "<div class='empty'>Không có dự án nợ xấu nào.</div>";
+        c2.innerHTML += "<div class='empty'>No bad debt cases.</div>";
       } else {
         const rows = r.bad_debt_list.map(b => `<tr>
           <td>${b.order_code}</td><td>${b.company_name}</td><td>${b.staff_name}</td>
           <td class="money">${aud(b.net_amount_cents)}</td>
         </tr>`).join("");
-        c2.innerHTML += `<table><thead><tr><th>Đơn hàng</th><th>Khách hàng</th><th>Nhân viên hỗ trợ</th><th>Số tiền May đã hỗ trợ</th></tr></thead><tbody>${rows}</tbody></table>`;
+        c2.innerHTML += `<table><thead><tr><th>Job</th><th>Client</th><th>Supported Staff</th><th>Amount Subsidized by May</th></tr></thead><tbody>${rows}</tbody></table>`;
       }
       resultZone.appendChild(c2);
     } catch (err) {
@@ -1198,11 +1225,11 @@ function formCard(title, fields, onSubmit, extraCheckboxes, options) {
   const btnRow = document.createElement("div");
   btnRow.style.display = "flex"; btnRow.style.gap = "8px"; btnRow.style.marginTop = "6px";
   const submitBtn = document.createElement("button");
-  submitBtn.type = "submit"; submitBtn.className = "primary"; submitBtn.textContent = options.submitLabel || "Lưu";
+  submitBtn.type = "submit"; submitBtn.className = "primary"; submitBtn.textContent = options.submitLabel || "Save";
   btnRow.appendChild(submitBtn);
   if (options.onCancel) {
     const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button"; cancelBtn.className = "ghost"; cancelBtn.textContent = "Hủy";
+    cancelBtn.type = "button"; cancelBtn.className = "ghost"; cancelBtn.textContent = "Cancel";
     cancelBtn.onclick = options.onCancel;
     btnRow.appendChild(cancelBtn);
   }
@@ -1223,7 +1250,7 @@ function warnCard(msg) {
   const d = document.createElement("div");
   d.className = "card";
   d.style.borderColor = "var(--warn)";
-  d.innerHTML = `<span class="badge warn">Lưu ý</span> ${msg}`;
+  d.innerHTML = `<span class="badge warn">Note</span> ${msg}`;
   return d;
 }
 function infoNote(msg) {
