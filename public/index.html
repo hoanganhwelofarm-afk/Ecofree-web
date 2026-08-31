@@ -375,8 +375,11 @@ function renderClients(root) {
     { key: "contact_person", label: "Contact Person", type: "text", default: editing?.contact_person },
     { key: "email", label: "Email", type: "email", default: editing?.email },
     { key: "phone", label: "Phone Number", type: "text", default: editing?.phone },
+    { key: "default_fee_mode", label: "Transfer Fee (Default)", type: "select",
+      options: ["client","ecofree","none"],
+      labels: { client: "Client Pays 5%", ecofree: "Ecofree Pays 5%", none: "No Fee (Direct Bank Transfer)" },
+      default: editing?.default_fee_mode || (editing?.client_pays_fee_default ? "client" : editing ? "ecofree" : "client") },
   ], async (data) => {
-    data.client_pays_fee_default = data.client_pays_fee_default ? 1 : 0;
     if (editing) {
       await api("/api/clients?id=" + editing.client_id, "PUT", data);
       toast("Client updated."); editingRecord = null; render();
@@ -384,7 +387,7 @@ function renderClients(root) {
       await api("/api/clients", "POST", data);
       toast("Client added."); render();
     }
-  }, [{ key: "client_pays_fee_default", label: "Client pays the 5% transfer fee (default)", checked: editing?.client_pays_fee_default }],
+  }, null,
   { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   root.appendChild(filterBar("clients", { placeholder: "Search by code, company, contact, email…" }));
@@ -398,10 +401,16 @@ function renderClients(root) {
   } else if (list.length === 0) {
     card.innerHTML += "<div class='empty'>No clients match your filter.</div>";
   } else {
+    const feeBadge = (c) => {
+      const mode = c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree");
+      if (mode === "client") return "<span class='badge muted'>Client Pays 5%</span>";
+      if (mode === "none") return "<span class='badge ok'>No Fee</span>";
+      return "<span class='badge muted'>Ecofree Pays 5%</span>";
+    };
     const rows = list.map(c => `<tr>
       <td>${c.client_code}</td><td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
       <td>${c.email || "—"}</td><td>${c.phone || "—"}</td>
-      <td>${c.client_pays_fee_default ? "<span class='badge muted'>Client Pays Fee</span>" : "<span class='badge muted'>Ecofree Pays Fee</span>"}</td>
+      <td>${feeBadge(c)}</td>
       <td><button class="ghost" data-edit="${c.client_id}">Edit</button></td>
     </tr>`).join("");
     card.innerHTML += `<table><thead><tr><th>Code</th><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Default Fee</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -485,12 +494,17 @@ function renderQuotations(root) {
     { key: "created_date", label: "Date Created", type: "date", default: editing?.created_date || new Date().toISOString().slice(0,10) },
     { key: "valid_until", label: "Quote Valid Until", type: "date", default: editing?.valid_until },
     { key: "contract_type", label: "Contract Type", type: "select", options: ["fixed","hourly"], labels:{fixed:"Fixed Price",hourly:"Hourly"}, default: editing?.contract_type },
-    { key: "fee_payer", label: "Who Pays the Transfer Fee", type: "select", options: ["","client","ecofree"], labels:{"":"(Use Client default)",client:"Client",ecofree:"Ecofree"}, default: editing?.fee_payer },
+    { key: "fee_mode", label: "Transfer Fee", type: "select", options: ["","client","ecofree","none"],
+      labels:{"":"(Use Client default)",client:"Client Pays 5%",ecofree:"Ecofree Pays 5%",none:"No Fee (Direct Bank Transfer)"},
+      default: editing?.fee_mode || editing?.fee_payer },
     { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: editing ? fromCents(editing.total_amount_cents) : undefined },
     { key: "notes", label: "Notes (project pricing notes — will carry over to the Job when approved)", type: "textarea", default: editing?.notes },
   ], async (data) => {
     data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
-    if (!data.fee_payer) delete data.fee_payer;
+    if (!data.fee_mode) {
+      const c = cache.clients.find(x => x.client_id == data.client_id);
+      data.fee_mode = (c && (c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree"))) || "client";
+    }
     if (editing) {
       await api("/api/quotations?id=" + editing.quotation_id, "PUT", data);
       toast("Quote updated."); editingRecord = null; render();
