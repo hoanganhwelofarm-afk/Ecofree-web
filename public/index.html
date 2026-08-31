@@ -707,31 +707,48 @@ function renderFixedOrderDetail(root, order) {
 // Dùng chung cho cả Loại A (chỉ theo dõi công việc, showRates=false) và Loại B (tính tiền, showRates=true)
 function renderTaskTrackerSection(root, order, opts) {
   const showRates = opts && opts.showRates;
+  const editingTask = editingRecord && editingRecord.table === "tasks"
+    ? cache.tasks.find(t => t.task_id === editingRecord.id && t.order_id === order.order_id)
+    : null;
+
   const fields = [
-    { key: "task_name", label: "Task Name", type: "text", required: true },
-    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    { key: "task_name", label: "Task Name", type: "text", required: true, default: editingTask?.task_name },
+    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true, default: editingTask?.staff_id },
   ];
   if (showRates) {
     fields.push(
-      { key: "hours", label: "Hours Worked", type: "number", step:"0.25" },
-      { key: "client_rate_aud", label: "Client Bill Rate /hr (AUD)", type: "number", step:"0.01" },
-      { key: "staff_rate_aud", label: "Staff Pay Rate /hr (AUD)", type: "number", step:"0.01" },
+      { key: "hours", label: "Hours Worked", type: "number", step:"0.25", default: editingTask?.hours },
+      { key: "client_rate_aud", label: "Client Bill Rate /hr (AUD)", type: "number", step:"0.01", default: editingTask ? fromCents(editingTask.client_rate_cents) : undefined },
+      { key: "staff_rate_aud", label: "Staff Pay Rate /hr (AUD)", type: "number", step:"0.01", default: editingTask ? fromCents(editingTask.staff_rate_cents) : undefined },
     );
   } else {
-    fields.push({ key: "hours", label: "Hours Worked (reference only — not used for billing)", type: "number", step:"0.25" });
+    fields.push({ key: "hours", label: "Hours Worked (reference only — not used for billing)", type: "number", step:"0.25", default: editingTask?.hours });
   }
-  root.appendChild(formCard("Add New Task", fields, async (data) => {
-    data.order_id = order.order_id;
+  if (editingTask) {
+    fields.push({ key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: editingTask.status });
+  }
+
+  if (editingTask && editingTask.billing_cycle_id) {
+    root.appendChild(warnCard(`This task is already included in Progress Claim #${editingTask.billing_cycle_id}. Editing it here will NOT update the invoice already generated from that claim — you'll need to edit the invoice directly on the Invoices tab if needed.`));
+  }
+
+  root.appendChild(formCard(editingTask ? "Edit Task: " + editingTask.task_name : "Add New Task", fields, async (data) => {
     if (showRates) {
       data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
       data.staff_rate_cents = toCents(data.staff_rate_aud); delete data.staff_rate_aud;
     } else {
       data.client_rate_cents = 0; data.staff_rate_cents = 0;
     }
-    data.status = "in_progress";
-    await api("/api/tasks", "POST", data);
-    toast("Task added."); render();
-  }));
+    if (editingTask) {
+      await api("/api/tasks?id=" + editingTask.task_id, "PUT", data);
+      toast("Task updated."); editingRecord = null; render();
+    } else {
+      data.order_id = order.order_id;
+      data.status = "in_progress";
+      await api("/api/tasks", "POST", data);
+      toast("Task added."); render();
+    }
+  }, null, editingTask ? { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } } : undefined));
 
   const tasks = cache.tasks.filter(t => t.order_id === order.order_id);
   const taskCard = document.createElement("div");
@@ -748,18 +765,22 @@ function renderTaskTrackerSection(root, order, opts) {
       const tr = document.createElement("tr");
       const rateCells = showRates ? `<td class="money">${aud(Math.round((t.hours||0)*t.client_rate_cents))}</td><td class="money">${aud(Math.round((t.hours||0)*t.staff_rate_cents))}</td>` : "";
       const cycleCell = showRates ? `<td>${t.billing_cycle_id ? "<span class='badge muted'>Claimed #"+t.billing_cycle_id+"</span>" : "—"}</td>` : "";
+      const completeBtn = t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Mark Complete</button>` : "";
       tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours ?? "—"}</td>${rateCells}
         <td>${t.status === "completed" ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
         ${cycleCell}
-        <td>${t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Mark Complete</button>` : "—"}</td>`;
+        <td class="actions-cell">${completeBtn}<button class="ghost" data-edittask="${t.task_id}">Edit</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
     tbl.addEventListener("click", async (e) => {
-      const id = e.target.getAttribute("data-donetask");
-      if (!id) return;
-      try { await api("/api/tasks?id=" + id, "PUT", { status: "completed" }); toast("Marked complete."); render(); }
-      catch (err) { toast(err.message, true); }
+      const doneId = e.target.getAttribute("data-donetask");
+      const editId = e.target.getAttribute("data-edittask");
+      if (doneId) {
+        try { await api("/api/tasks?id=" + doneId, "PUT", { status: "completed" }); toast("Marked complete."); render(); }
+        catch (err) { toast(err.message, true); }
+      }
+      if (editId) { editingRecord = { table: "tasks", id: parseInt(editId) }; render(); }
     });
     taskCard.appendChild(tbl);
   }
@@ -869,7 +890,7 @@ function renderInvoices(root) {
       tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
         <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date || "—"}</td><td>${i.due_date || "—"}</td>
         <td>${statusBadge}${remindBadge}</td>
-        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Edit</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Export PDF</button></td>`;
+        <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Edit</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Preview PDF</button></td>`;
       tbody.appendChild(tr);
     });
     tbl.appendChild(tbody);
@@ -886,7 +907,7 @@ function renderInvoices(root) {
       }
       if (editId) { editingRecord = { table: "invoices", id: parseInt(editId) }; render(); }
       if (pdfId) {
-        try { toast("Generating PDF…"); await exportInvoicePDF(parseInt(pdfId)); }
+        try { toast("Preparing preview…"); await previewInvoicePDF(parseInt(pdfId)); }
         catch (err) { toast(err.message, true); }
       }
     });
@@ -917,7 +938,7 @@ const NOTES_TEXT = [
   "If you have any questions regarding this invoice, please feel free to contact me.",
 ];
 
-async function exportInvoicePDF(invoiceId) {
+async function buildInvoiceDoc(invoiceId) {
   const d = await api("/api/invoice-detail?id=" + invoiceId);
   const inv = d.invoice;
   const { jsPDF } = window.jspdf;
@@ -1016,7 +1037,56 @@ async function exportInvoicePDF(invoiceId) {
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
   NOTES_TEXT.forEach((line) => { doc.text(line, L, y); y += 5; });
 
-  doc.save(`${inv.invoice_code}.pdf`);
+  return { doc, code: inv.invoice_code };
+}
+
+// ---------- Modal xem trước dùng chung ----------
+function closeModal() {
+  const m = document.getElementById("active-modal");
+  if (m) m.remove();
+}
+function openModal(title, bodyEl, footerButtons) {
+  closeModal();
+  const overlay = document.createElement("div");
+  overlay.id = "active-modal";
+  overlay.style.cssText = "position:fixed;inset:0;background:rgba(20,26,22,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;";
+  const box = document.createElement("div");
+  box.style.cssText = "background:#fff;border-radius:12px;width:100%;max-width:880px;height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);";
+  const header = document.createElement("div");
+  header.style.cssText = "padding:14px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;";
+  header.innerHTML = `<b style="font-size:15px;">${title}</b>`;
+  const xBtn = document.createElement("button");
+  xBtn.className = "ghost"; xBtn.textContent = "✕ Close"; xBtn.onclick = closeModal;
+  header.appendChild(xBtn);
+  const body = document.createElement("div");
+  body.style.cssText = "flex:1;overflow:hidden;background:#525659;";
+  body.appendChild(bodyEl);
+  box.appendChild(header);
+  box.appendChild(body);
+  if (footerButtons && footerButtons.length) {
+    const footer = document.createElement("div");
+    footer.style.cssText = "padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;";
+    footerButtons.forEach((b) => footer.appendChild(b));
+    box.appendChild(footer);
+  }
+  overlay.appendChild(box);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  document.body.appendChild(overlay);
+}
+
+async function previewInvoicePDF(invoiceId) {
+  const { doc, code } = await buildInvoiceDoc(invoiceId);
+  const blobUrl = doc.output("bloburl");
+  const iframe = document.createElement("iframe");
+  iframe.src = blobUrl;
+  iframe.style.cssText = "width:100%;height:100%;border:none;";
+
+  const downloadBtn = document.createElement("button");
+  downloadBtn.className = "primary";
+  downloadBtn.textContent = "⬇ Download PDF";
+  downloadBtn.onclick = () => doc.save(`${code}.pdf`);
+
+  openModal(`Invoice Preview — ${code}`, iframe, [downloadBtn]);
 }
 
 // ---------- PAYOUT ----------
@@ -1127,6 +1197,31 @@ function firstDayOfMonth() {
   return d.toISOString().slice(0,10);
 }
 async function renderReports(root) {
+  const backupCard = document.createElement("div");
+  backupCard.className = "card";
+  backupCard.innerHTML = `<h2>💾 Data Backup</h2>
+    <p style="font-size:13.5px;color:var(--text-soft);margin:0 0 12px;">
+      Download a full copy of all your data (Clients, Staff, Quotes, Jobs, Invoices, Payouts...) as a JSON file.
+      Keep this somewhere safe (your computer, Google Drive) as an extra backup independent of Cloudflare.
+      Recommended: do this before making any major changes to the software.
+    </p>
+    <button class="primary" id="download-backup-btn">Download Full Backup (JSON)</button>`;
+  root.appendChild(backupCard);
+  backupCard.querySelector("#download-backup-btn").addEventListener("click", async () => {
+    try {
+      toast("Preparing backup…");
+      const data = await api("/api/backup-all");
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ecofree-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("Backup downloaded.");
+    } catch (err) { toast(err.message, true); }
+  });
+
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = "<h2>Date Filter</h2>";
