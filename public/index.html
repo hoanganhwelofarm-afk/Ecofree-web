@@ -432,10 +432,10 @@ function renderStaff(root) {
     { key: "full_name", label: "Full Name", type: "text", required: true, default: editing?.full_name },
     { key: "role", label: "Position", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
     { key: "avg_hourly_rate_aud", label: "Avg. Hourly Rate (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
-    { key: "management_fee_rate", label: "Management Fee Rate", type: "select", options: ["20","30"], labels:{20:"20%",30:"30%"}, default: editing?.management_fee_rate },
+    { key: "management_fee_rate_pct", label: "Management Fee Rate (%)", type: "number", step: "0.1", min: "0", max: "100",
+      default: editing ? (editing.management_fee_rate_pct ?? editing.management_fee_rate) : 20 },
     { key: "user_role", label: "System Role", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Accountant",manager:"Manager"}, default: editing?.user_role },
   ], async (data) => {
-    data.management_fee_rate = parseInt(data.management_fee_rate);
     data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
     if (editing) {
       data.is_active = data.is_active ? 1 : 0;
@@ -464,10 +464,10 @@ function renderStaff(root) {
     const rows = list.map(s => `<tr>
       <td>${s.staff_code}</td><td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
       <td class="money">${aud(s.avg_hourly_rate_cents)}/hr</td>
-      <td>${s.management_fee_rate}%</td><td>${s.user_role}</td>
+      <td>${s.management_fee_rate_pct ?? s.management_fee_rate}%</td><td>${s.user_role}</td>
       <td><button class="ghost" data-edit="${s.staff_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Code</th><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Code</th><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee %</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -1317,7 +1317,7 @@ function formCard(title, fields, onSubmit, extraCheckboxes, options) {
       wrap.style.gridColumn = "1 / -1";
       inputHtml = `<textarea name="${f.key}" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;resize:vertical;" ${f.required?"required":""}>${f.default!==undefined && f.default!==null?f.default:""}</textarea>`;
     } else {
-      inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.required?"required":""} value="${f.default!==undefined && f.default!==null?f.default:""}">`;
+      inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.min!==undefined?`min="${f.min}"`:""} ${f.max!==undefined?`max="${f.max}"`:""} ${f.required?"required":""} value="${f.default!==undefined && f.default!==null?f.default:""}">`;
     }
     wrap.innerHTML = `<label>${f.label}${f.required?" *":""}</label>${inputHtml}`;
     grid.appendChild(wrap);
