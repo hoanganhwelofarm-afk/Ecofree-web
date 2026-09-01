@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#F6F7F3;
@@ -1103,6 +1104,87 @@ async function previewInvoicePDF(invoiceId) {
   openModal(`Invoice Preview — ${code}`, iframe, [downloadBtn]);
 }
 
+// ---------- Xuất báo cáo Excel nhiều sheet (chỉ đọc dữ liệu, không thay đổi gì) ----------
+function sheetOrPlaceholder(rows) {
+  return rows.length > 0 ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.json_to_sheet([{ Info: "No data yet" }]);
+}
+function money(cents) {
+  return cents === null || cents === undefined ? "" : Number((cents / 100).toFixed(2));
+}
+
+function exportExcelReport() {
+  const wb = XLSX.utils.book_new();
+
+  const clientsRows = cache.clients.map(c => ({
+    Code: c.client_code, Company: c.company_name, Contact: c.contact_person || "",
+    Email: c.email || "", Phone: c.phone || "",
+    "Default Fee": c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree"),
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(clientsRows), "Clients");
+
+  const staffRows = cache.staff.map(s => ({
+    Code: s.staff_code, Name: s.full_name, Position: s.role,
+    "Avg Rate (AUD/hr)": money(s.avg_hourly_rate_cents),
+    "Mgmt Fee %": s.management_fee_rate_pct ?? s.management_fee_rate,
+    "System Role": s.user_role, Active: s.is_active ? "Yes" : "No",
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(staffRows), "Staff");
+
+  const quotesRows = cache.quotations.map(q => ({
+    Code: q.quotation_code, Client: clientName(q.client_id), Project: q.project_name,
+    "Created Date": q.created_date, "Valid Until": q.valid_until || "",
+    Type: q.contract_type === "fixed" ? "Fixed Price" : "Hourly",
+    "Quoted Amount (AUD)": money(q.total_amount_cents), Status: q.status,
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(quotesRows), "Quotes");
+
+  const jobsRows = cache.orders.map(o => ({
+    Code: o.order_code, Client: clientName(o.client_id), Project: o.project_name || "",
+    Type: o.contract_type === "fixed" ? "Fixed Price" : "Hourly",
+    "Quoted Amount (AUD)": money(o.total_amount_cents),
+    "Start Date": o.start_date || "", Deadline: o.deadline || "", Status: o.status,
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(jobsRows), "Jobs");
+
+  const invoicesRows = cache.invoices.map(i => ({
+    "Invoice Code": i.invoice_code, Client: clientName(i.client_id), Job: orderLabel(i.order_id),
+    "Subtotal (AUD)": money(i.base_amount_cents), "Transfer Fee (AUD)": money(i.transfer_fee_cents),
+    "Total (AUD)": money(i.total_amount_cents),
+    "Sent Date": i.sent_date || "", "Due Date": i.due_date || "", "Paid Date": i.paid_date || "",
+    Status: i.status,
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(invoicesRows), "Money Received");
+
+  const payoutsRows = cache.payouts.map(p => ({
+    Staff: staffName(p.staff_id), Job: orderLabel(p.order_id), Type: p.case_type,
+    "Gross (AUD)": money(p.gross_amount_cents), "Mgmt Fee (AUD)": money(p.management_fee_cents),
+    "Tax 7% (AUD)": money(p.tax_withheld_cents), "Net Pay (AUD)": money(p.net_amount_cents),
+    "Exchange Rate": p.rate_payout || "", "VND Amount": p.net_amount_vnd || "",
+    "Payout Date": p.payout_date || "", Status: p.status,
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(payoutsRows), "Money Paid to Staff");
+
+  const tasksRows = cache.tasks.map(t => ({
+    Job: orderLabel(t.order_id), Task: t.task_name, Staff: staffName(t.staff_id),
+    Hours: t.hours ?? "",
+    "Client Rate (AUD/hr)": t.client_rate_cents ? money(t.client_rate_cents) : "",
+    "Staff Rate (AUD/hr)": t.staff_rate_cents ? money(t.staff_rate_cents) : "",
+    "Client Amount (AUD)": money(Math.round((t.hours || 0) * (t.client_rate_cents || 0))),
+    "Staff Amount (AUD)": money(Math.round((t.hours || 0) * (t.staff_rate_cents || 0))),
+    Status: t.status, "Progress Claim #": t.billing_cycle_id || "",
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(tasksRows), "Task Details");
+
+  const fixedPayRows = cache.order_staff_payout.map(x => ({
+    Job: orderLabel(x.order_id), Staff: staffName(x.staff_id),
+    "Fixed Pay (AUD)": money(x.fixed_amount_cents),
+    "Delivered Date": x.delivered_date || "", Completed: x.completed ? "Yes" : "No",
+  }));
+  XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(fixedPayRows), "Fixed Pay Details");
+
+  XLSX.writeFile(wb, `ecofree-report-${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
 // ---------- PAYOUT ----------
 function renderPayouts(root) {
   const editing = editingRecord && editingRecord.table === "payouts" ? cache.payouts.find(p => p.payout_id === editingRecord.id) : null;
@@ -1213,13 +1295,15 @@ function firstDayOfMonth() {
 async function renderReports(root) {
   const backupCard = document.createElement("div");
   backupCard.className = "card";
-  backupCard.innerHTML = `<h2>💾 Data Backup</h2>
+  backupCard.innerHTML = `<h2>💾 Data Backup & Reports</h2>
     <p style="font-size:13.5px;color:var(--text-soft);margin:0 0 12px;">
-      Download a full copy of all your data (Clients, Staff, Quotes, Jobs, Invoices, Payouts...) as a JSON file.
-      Keep this somewhere safe (your computer, Google Drive) as an extra backup independent of Cloudflare.
-      Recommended: do this before making any major changes to the software.
+      Download a full copy of your data to keep on your computer or Google Drive — separate from Cloudflare.
+      Recommended: do this weekly, and before making any major changes to the software.
     </p>
-    <button class="primary" id="download-backup-btn">Download Full Backup (JSON)</button>`;
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button class="primary" id="download-excel-btn">📊 Download Excel Report (.xlsx)</button>
+      <button class="ghost" id="download-backup-btn">Download Raw Backup (JSON)</button>
+    </div>`;
   root.appendChild(backupCard);
   backupCard.querySelector("#download-backup-btn").addEventListener("click", async () => {
     try {
@@ -1234,6 +1318,10 @@ async function renderReports(root) {
       URL.revokeObjectURL(url);
       toast("Backup downloaded.");
     } catch (err) { toast(err.message, true); }
+  });
+  backupCard.querySelector("#download-excel-btn").addEventListener("click", () => {
+    try { toast("Preparing Excel file…"); exportExcelReport(); toast("Excel file downloaded."); }
+    catch (err) { toast(err.message, true); }
   });
 
   const card = document.createElement("div");
