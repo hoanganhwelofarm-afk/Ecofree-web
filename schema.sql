@@ -35,7 +35,8 @@ CREATE TABLE clients (
   contact_person        TEXT,
   email                 TEXT,
   phone                 TEXT,
-  client_pays_fee_default INTEGER NOT NULL DEFAULT 0 CHECK (client_pays_fee_default IN (0,1)),
+  client_pays_fee_default INTEGER NOT NULL DEFAULT 0 CHECK (client_pays_fee_default IN (0,1)), -- lịch sử, không dùng nữa
+  default_fee_mode      TEXT DEFAULT 'client', -- 'client' | 'ecofree' | 'none' (không có phí — chuyển khoản thẳng)
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -49,7 +50,8 @@ CREATE TABLE staff (
   role                  TEXT NOT NULL CHECK (role IN ('estimator','drafter','admin','marketing')),
   bank_info             TEXT,
   avg_hourly_rate_cents INTEGER NOT NULL,
-  management_fee_rate   INTEGER NOT NULL CHECK (management_fee_rate IN (20,30)),
+  management_fee_rate   INTEGER NOT NULL CHECK (management_fee_rate IN (20,30)), -- lịch sử, không dùng nữa
+  management_fee_rate_pct REAL, -- % tự nhập, không giới hạn (thay thế cột trên)
   user_role             TEXT NOT NULL CHECK (user_role IN ('member','accountant','manager')),
   is_active             INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
@@ -66,7 +68,8 @@ CREATE TABLE quotations (
   created_date          TEXT NOT NULL DEFAULT (date('now')),
   valid_until           TEXT,
   contract_type         TEXT NOT NULL CHECK (contract_type IN ('fixed','hourly')),
-  fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')),
+  fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')), -- lịch sử, không dùng nữa
+  fee_mode               TEXT, -- 'client' | 'ecofree' | 'none' (không có phí)
   total_amount_cents    INTEGER NOT NULL DEFAULT 0,
   notes                 TEXT,
   status                TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','approved','rejected'))
@@ -82,7 +85,8 @@ CREATE TABLE orders (
   client_id             INTEGER NOT NULL REFERENCES clients(client_id),
   project_name          TEXT,                          -- copy từ quotations.project_name lúc duyệt
   contract_type         TEXT NOT NULL CHECK (contract_type IN ('fixed','hourly')),
-  fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')),
+  fee_payer             TEXT CHECK (fee_payer IN ('client','ecofree')), -- lịch sử, không dùng nữa
+  fee_mode               TEXT, -- 'client' | 'ecofree' | 'none' (không có phí)
   start_date            TEXT NOT NULL DEFAULT (date('now')),
   deadline              TEXT,
   estimated_hours       REAL,
