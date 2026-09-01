@@ -3,10 +3,10 @@
 // Đây là mô hình "Workers + Static Assets" mới của Cloudflare (thay thế Pages Functions).
 
 const TABLES = {
-  clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","client_pays_fee_default"] },
-  staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","user_role","is_active"] },
-  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","total_amount_cents","notes","status"] },
-  orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","project_name","contract_type","fee_payer","start_date","deadline","estimated_hours","rate_estimated","total_amount_cents","notes","status"] },
+  clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","client_pays_fee_default","default_fee_mode"] },
+  staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","management_fee_rate_pct","user_role","is_active"] },
+  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","fee_mode","total_amount_cents","notes","status"] },
+  orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","project_name","contract_type","fee_payer","fee_mode","start_date","deadline","estimated_hours","rate_estimated","total_amount_cents","notes","status"] },
   order_staff_payout: { pk: "id", columns: ["order_id","staff_id","fixed_amount_cents","delivered_date","completed"] },
   tasks: { pk: "task_id", columns: ["order_id","task_name","staff_id","hours","client_rate_cents","staff_rate_cents","status","billing_cycle_id"] },
   billing_cycles: { pk: "cycle_id", columns: ["order_id","period_start","period_end","total_client_amount_cents","total_staff_amount_cents","transfer_fee_cents","invoice_id"] },
@@ -16,6 +16,18 @@ const TABLES = {
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
+}
+
+// Đọc chế độ phí chuyển đổi: ưu tiên cột mới fee_mode ('client'|'ecofree'|'none'),
+// tự rơi về cột cũ fee_payer nếu bản ghi tạo trước khi có tính năng "Không có phí".
+function feeMode(order) {
+  return order.fee_mode || order.fee_payer || "client";
+}
+
+// Đọc % phí quản lý: ưu tiên cột mới management_fee_rate_pct (tự nhập, không giới hạn),
+// tự rơi về cột cũ management_fee_rate (chỉ 20/30) nếu nhân viên tạo trước khi có tính năng này.
+function staffFeeRate(staff) {
+  return staff.management_fee_rate_pct ?? staff.management_fee_rate ?? 20;
 }
 
 export default {
@@ -43,6 +55,7 @@ async function handleApi(request, env, url) {
   if (resource === "close-billing-cycle" && request.method === "POST") return closeBillingCycle(request, env);
   if (resource === "check-fixed-order-invoice" && request.method === "POST") return checkFixedOrderInvoice(request, env);
   if (resource === "invoice-detail" && request.method === "GET") return getInvoiceDetail(request, env, url);
+  if (resource === "backup-all" && request.method === "GET") return backupAll(env);
 
   const cfg = TABLES[resource];
   if (!cfg) return json({ error: "Bảng không hợp lệ: " + resource }, 400);
@@ -101,9 +114,9 @@ async function approveQuotation(request, env) {
   if (!q) return json({ error: "Không tìm thấy báo giá" }, 404);
   if (q.status === "approved") return json({ error: "Báo giá này đã được duyệt trước đó" }, 400);
   const res = await env.DB.prepare(
-    `INSERT INTO orders (order_code, quotation_id, client_id, project_name, contract_type, fee_payer, start_date, rate_estimated, total_amount_cents, notes, status)
-     VALUES (?, ?, ?, ?, ?, ?, date('now'), 1, ?, ?, 'in_progress')`
-  ).bind(order_code, q.quotation_id, q.client_id, q.project_name, q.contract_type, q.fee_payer, q.total_amount_cents, q.notes).run();
+    `INSERT INTO orders (order_code, quotation_id, client_id, project_name, contract_type, fee_payer, fee_mode, start_date, rate_estimated, total_amount_cents, notes, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, date('now'), 1, ?, ?, 'in_progress')`
+  ).bind(order_code, q.quotation_id, q.client_id, q.project_name, q.contract_type, q.fee_payer, q.fee_mode, q.total_amount_cents, q.notes).run();
   await env.DB.prepare("UPDATE quotations SET status = 'approved' WHERE quotation_id = ?").bind(quotation_id).run();
   return json({ success: true, order_id: res.meta.last_row_id, order_code });
 }
@@ -123,7 +136,7 @@ async function closeBillingCycle(request, env) {
 
   const totalClient = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.client_rate_cents), 0);
   const totalStaff = doneTasks.reduce((s, t) => s + Math.round(t.hours * t.staff_rate_cents), 0);
-  const transferFee = order.fee_payer === "client" ? Math.round(totalClient * 0.05) : 0;
+  const transferFee = feeMode(order) === "client" ? Math.round(totalClient * 0.05) : 0;
 
   const res = await env.DB.prepare(
     `INSERT INTO billing_cycles (order_id, period_start, period_end, total_client_amount_cents, total_staff_amount_cents, transfer_fee_cents)
@@ -170,7 +183,7 @@ async function checkFixedOrderInvoice(request, env) {
   if (!allDone) return json({ created: false, reason: "Còn nhân viên chưa hoàn thành" });
 
   const baseAmount = order.total_amount_cents || 0;
-  const transferFee = order.fee_payer === "client" ? Math.round(baseAmount * 0.05) : 0;
+  const transferFee = feeMode(order) === "client" ? Math.round(baseAmount * 0.05) : 0;
   const invoice_code = "HD-NHAP-DH" + order_id;
 
   const invRes = await env.DB.prepare(
@@ -213,6 +226,16 @@ async function getInvoiceDetail(request, env, url) {
     invoice, client_name: client?.company_name, client_email: client?.email,
     project_name: order?.project_name, contract_type: order?.contract_type, line_items: lineItems
   });
+}
+
+async function backupAll(env) {
+  const tableNames = Object.keys(TABLES);
+  const backup = { generated_at: new Date().toISOString(), tables: {} };
+  for (const t of tableNames) {
+    const { results } = await env.DB.prepare(`SELECT * FROM ${t}`).all();
+    backup.tables[t] = results;
+  }
+  return json(backup);
 }
 
 async function getReport(request, env, url) {
@@ -273,8 +296,9 @@ async function calcPayout(request, env) {
 
   if (p.case_type === "client_paid") {
     const gross = p.gross_amount_cents;
-    const afterTransferFee = order.fee_payer === "client" ? gross : Math.round(gross * 0.95);
-    const feeRate = staff.management_fee_rate / 100;
+    const mode = feeMode(order);
+    const afterTransferFee = mode === "ecofree" ? Math.round(gross * 0.95) : gross;
+    const feeRate = staffFeeRate(staff) / 100;
     const afterMgmtFee = Math.round(afterTransferFee * (1 - feeRate));
     management_fee_cents = afterTransferFee - afterMgmtFee;
     tax_withheld_cents = Math.round(afterMgmtFee * 0.07);
