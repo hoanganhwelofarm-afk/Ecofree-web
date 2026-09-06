@@ -30,11 +30,16 @@ DROP TABLE IF EXISTS clients;
 -- ------------------------------------------------------------
 CREATE TABLE clients (
   client_id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_code           TEXT UNIQUE NOT NULL,
+  client_code           TEXT UNIQUE NOT NULL, -- nội bộ, không hiển thị trên giao diện
   company_name          TEXT NOT NULL,
   contact_person        TEXT,
   email                 TEXT,
   phone                 TEXT,
+  address               TEXT, -- hiển thị trên Invoice
+  accountant_email      TEXT, -- email kế toán KH nhận invoice (nếu khác email chính)
+  service_type          TEXT DEFAULT 'full', -- 'drafting' | 'estimating' | 'full'
+  client_status         TEXT DEFAULT 'active', -- 'active' | 'trial' | 'inactive'
+  payment_terms_days    INTEGER DEFAULT 30, -- số ngày thanh toán mặc định (7/14/30...)
   client_pays_fee_default INTEGER NOT NULL DEFAULT 0 CHECK (client_pays_fee_default IN (0,1)), -- lịch sử, không dùng nữa
   default_fee_mode      TEXT DEFAULT 'client', -- 'client' | 'ecofree' | 'none' (không có phí — chuyển khoản thẳng)
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
@@ -45,13 +50,15 @@ CREATE TABLE clients (
 -- ------------------------------------------------------------
 CREATE TABLE staff (
   staff_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  staff_code            TEXT UNIQUE NOT NULL,
+  staff_code            TEXT UNIQUE NOT NULL, -- nội bộ, không hiển thị trên giao diện
   full_name             TEXT NOT NULL,
   role                  TEXT NOT NULL CHECK (role IN ('estimator','drafter','admin','marketing')),
   bank_info             TEXT,
   avg_hourly_rate_cents INTEGER NOT NULL,
   management_fee_rate   INTEGER NOT NULL CHECK (management_fee_rate IN (20,30)), -- lịch sử, không dùng nữa
   management_fee_rate_pct REAL, -- % tự nhập, không giới hạn (thay thế cột trên)
+  start_date            TEXT, -- ngày vào làm
+  end_date              TEXT, -- ngày nghỉ việc
   user_role             TEXT NOT NULL CHECK (user_role IN ('member','accountant','manager')),
   is_active             INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
   created_at            TEXT NOT NULL DEFAULT (datetime('now'))
