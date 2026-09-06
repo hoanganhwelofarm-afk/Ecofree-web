@@ -378,8 +378,10 @@ function renderClients(root) {
     { key: "accountant_email", label: "Accountant Email (for invoices, if different)", type: "email", default: editing?.accountant_email },
     { key: "phone", label: "Phone Number", type: "text", default: editing?.phone },
     { key: "address", label: "Address (shown on Invoice)", type: "textarea", default: editing?.address },
-    { key: "service_type", label: "Service Type", type: "select", options: ["drafting","estimating","full"],
-      labels: { drafting: "Drafting", estimating: "Estimating", full: "Full (Drafting + Estimating)" },
+    { key: "service_type", label: "Service Type", type: "select",
+      options: ["administrative","marketing","render","drafting","estimating","full"],
+      labels: { administrative: "Administrative", marketing: "Marketing", render: "Render",
+        drafting: "Drafting", estimating: "Estimating", full: "Full (All Services)" },
       default: editing?.service_type || "full" },
     { key: "client_status", label: "Client Status", type: "select", options: ["active","trial","inactive"],
       labels: { active: "Active — Working Together", trial: "Trial", inactive: "Inactive — No Longer Working Together" },
@@ -432,7 +434,8 @@ function renderClients(root) {
       if (s === "inactive") return "<span class='badge danger'>Inactive</span>";
       return "<span class='badge ok'>Active</span>";
     };
-    const serviceLabel = { drafting: "Drafting", estimating: "Estimating", full: "Full" };
+    const serviceLabel = { administrative: "Administrative", marketing: "Marketing", render: "Render",
+      drafting: "Drafting", estimating: "Estimating", full: "Full" };
     const rows = list.map(c => `<tr>
       <td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
       <td>${c.email || "—"}${c.accountant_email ? "<br><span style='color:var(--text-soft);font-size:12px;'>Acct: "+c.accountant_email+"</span>" : ""}</td>
