@@ -3,8 +3,8 @@
 // Đây là mô hình "Workers + Static Assets" mới của Cloudflare (thay thế Pages Functions).
 
 const TABLES = {
-  clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","client_pays_fee_default","default_fee_mode"] },
-  staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","management_fee_rate_pct","user_role","is_active"] },
+  clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","address","accountant_email","service_type","client_status","payment_terms_days","client_pays_fee_default","default_fee_mode"] },
+  staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","management_fee_rate_pct","start_date","end_date","user_role","is_active"] },
   quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","fee_mode","total_amount_cents","notes","status"] },
   orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","project_name","contract_type","fee_payer","fee_mode","start_date","deadline","estimated_hours","rate_estimated","total_amount_cents","notes","status"] },
   order_staff_payout: { pk: "id", columns: ["order_id","staff_id","fixed_amount_cents","delivered_date","completed"] },
@@ -201,7 +201,7 @@ async function getInvoiceDetail(request, env, url) {
   const invoice = await env.DB.prepare("SELECT * FROM invoices WHERE invoice_id = ?").bind(id).first();
   if (!invoice) return json({ error: "Không tìm thấy hóa đơn" }, 404);
 
-  const client = await env.DB.prepare("SELECT company_name, email FROM clients WHERE client_id = ?").bind(invoice.client_id).first();
+  const client = await env.DB.prepare("SELECT company_name, email, accountant_email, address FROM clients WHERE client_id = ?").bind(invoice.client_id).first();
   const order = await env.DB.prepare("SELECT * FROM orders WHERE order_id = ?").bind(invoice.order_id).first();
 
   let lineItems = [];
@@ -223,7 +223,9 @@ async function getInvoiceDetail(request, env, url) {
   }
 
   return json({
-    invoice, client_name: client?.company_name, client_email: client?.email,
+    invoice, client_name: client?.company_name,
+    client_email: client?.accountant_email || client?.email, // ưu tiên email kế toán KH nếu có
+    client_address: client?.address,
     project_name: order?.project_name, contract_type: order?.contract_type, line_items: lineItems
   });
 }
