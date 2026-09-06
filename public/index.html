@@ -128,7 +128,7 @@ let currentTab = "tongquan";
 let selectedOrderId = null;
 let editingRecord = null; // { table: 'clients', id: 3 }
 let filters = {
-  clients: { q: "" },
+  clients: { q: "", status: "" },
   staff: { q: "", activeOnly: false },
   quotations: { q: "", status: "" },
   orders: { q: "", status: "", type: "" },
@@ -346,8 +346,9 @@ function buildInvoiceReminderTable(list) {
   list.forEach(i => {
     const tr = document.createElement("tr");
     const client = cache.clients.find(c => c.client_id == i.client_id);
-    const mailLink = client && client.email
-      ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${client.email}?subject=Payment Reminder — Invoice ${i.invoice_code}&body=Dear ${encodeURIComponent(client.company_name)}, this is a friendly reminder that invoice ${i.invoice_code} was sent 7 days ago. Please confirm receipt and arrange payment at your earliest convenience. Thank you." target="_blank">Draft Reminder Email</a>`
+    const sendToEmail = client && (client.accountant_email || client.email);
+    const mailLink = sendToEmail
+      ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${sendToEmail}?subject=Payment Reminder — Invoice ${i.invoice_code}&body=Dear ${encodeURIComponent(client.company_name)}, this is a friendly reminder that invoice ${i.invoice_code} was sent 7 days ago. Please confirm receipt and arrange payment at your earliest convenience. Thank you." target="_blank">Draft Reminder Email</a>`
       : "<span class='empty'>Client has no email on file</span>";
     tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
       <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date}</td>
@@ -371,11 +372,20 @@ function buildInvoiceReminderTable(list) {
 function renderClients(root) {
   const editing = editingRecord && editingRecord.table === "clients" ? cache.clients.find(c => c.client_id === editingRecord.id) : null;
   root.appendChild(formCard(editing ? "Edit Client: " + editing.company_name : "Add New Client", [
-    { key: "client_code", label: "Client Code", type: "text", required: true, default: editing?.client_code },
     { key: "company_name", label: "Company / Contractor Name", type: "text", required: true, default: editing?.company_name },
     { key: "contact_person", label: "Contact Person", type: "text", default: editing?.contact_person },
     { key: "email", label: "Email", type: "email", default: editing?.email },
+    { key: "accountant_email", label: "Accountant Email (for invoices, if different)", type: "email", default: editing?.accountant_email },
     { key: "phone", label: "Phone Number", type: "text", default: editing?.phone },
+    { key: "address", label: "Address (shown on Invoice)", type: "textarea", default: editing?.address },
+    { key: "service_type", label: "Service Type", type: "select", options: ["drafting","estimating","full"],
+      labels: { drafting: "Drafting", estimating: "Estimating", full: "Full (Drafting + Estimating)" },
+      default: editing?.service_type || "full" },
+    { key: "client_status", label: "Client Status", type: "select", options: ["active","trial","inactive"],
+      labels: { active: "Active — Working Together", trial: "Trial", inactive: "Inactive — No Longer Working Together" },
+      default: editing?.client_status || "active" },
+    { key: "payment_terms_days", label: "Default Payment Terms (days)", type: "number", step: "1", min: "0",
+      default: editing?.payment_terms_days ?? 30 },
     { key: "default_fee_mode", label: "Transfer Fee (Default)", type: "select",
       options: ["client","ecofree","none"],
       labels: { client: "Client Pays 5%", ecofree: "Ecofree Pays 5%", none: "No Fee (Direct Bank Transfer)" },
@@ -385,15 +395,23 @@ function renderClients(root) {
       await api("/api/clients?id=" + editing.client_id, "PUT", data);
       toast("Client updated."); editingRecord = null; render();
     } else {
+      data.client_code = "CL-" + Date.now().toString().slice(-6); // sinh ngầm, không hiển thị
       await api("/api/clients", "POST", data);
       toast("Client added."); render();
     }
   }, null,
   { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
-  root.appendChild(filterBar("clients", { placeholder: "Search by code, company, contact, email…" }));
+  root.appendChild(filterBar("clients", {
+    placeholder: "Search by company, contact, email…",
+    statusOptions: [
+      { value: "active", label: "Active" }, { value: "trial", label: "Trial" }, { value: "inactive", label: "Inactive" },
+    ],
+  }));
 
-  const list = cache.clients.filter(c => matchesText(filters.clients.q, c.client_code, c.company_name, c.contact_person, c.email, c.phone));
+  let list = cache.clients.filter(c => matchesText(filters.clients.q, c.company_name, c.contact_person, c.email, c.accountant_email, c.phone));
+  if (filters.clients.status) list = list.filter(c => (c.client_status || "active") === filters.clients.status);
+
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = "<h2>Client List</h2>";
@@ -408,13 +426,24 @@ function renderClients(root) {
       if (mode === "none") return "<span class='badge ok'>No Fee</span>";
       return "<span class='badge muted'>Ecofree Pays 5%</span>";
     };
+    const statusBadge = (c) => {
+      const s = c.client_status || "active";
+      if (s === "trial") return "<span class='badge warn'>Trial</span>";
+      if (s === "inactive") return "<span class='badge danger'>Inactive</span>";
+      return "<span class='badge ok'>Active</span>";
+    };
+    const serviceLabel = { drafting: "Drafting", estimating: "Estimating", full: "Full" };
     const rows = list.map(c => `<tr>
-      <td>${c.client_code}</td><td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
-      <td>${c.email || "—"}</td><td>${c.phone || "—"}</td>
+      <td>${c.company_name}</td><td>${c.contact_person || "—"}</td>
+      <td>${c.email || "—"}${c.accountant_email ? "<br><span style='color:var(--text-soft);font-size:12px;'>Acct: "+c.accountant_email+"</span>" : ""}</td>
+      <td>${c.phone || "—"}</td>
+      <td>${serviceLabel[c.service_type] || "Full"}</td>
+      <td>${c.payment_terms_days ?? 30} days</td>
       <td>${feeBadge(c)}</td>
+      <td>${statusBadge(c)}</td>
       <td><button class="ghost" data-edit="${c.client_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Code</th><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Default Fee</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Service</th><th>Terms</th><th>Fee</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -429,12 +458,13 @@ function renderClients(root) {
 function renderStaff(root) {
   const editing = editingRecord && editingRecord.table === "staff" ? cache.staff.find(s => s.staff_id === editingRecord.id) : null;
   root.appendChild(formCard(editing ? "Edit Staff: " + editing.full_name : "Add New Staff", [
-    { key: "staff_code", label: "Staff Code", type: "text", required: true, default: editing?.staff_code },
     { key: "full_name", label: "Full Name", type: "text", required: true, default: editing?.full_name },
     { key: "role", label: "Position", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
     { key: "avg_hourly_rate_aud", label: "Avg. Hourly Rate (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
     { key: "management_fee_rate_pct", label: "Management Fee Rate (%)", type: "number", step: "0.1", min: "0", max: "100",
       default: editing ? (editing.management_fee_rate_pct ?? editing.management_fee_rate) : 20 },
+    { key: "start_date", label: "Start Date", type: "date", default: editing?.start_date },
+    { key: "end_date", label: "End Date (leave blank if still active)", type: "date", default: editing?.end_date },
     { key: "user_role", label: "System Role", type: "select", options: ["member","accountant","manager"], labels:{member:"Member",accountant:"Accountant",manager:"Manager"}, default: editing?.user_role },
   ], async (data) => {
     data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
@@ -443,6 +473,7 @@ function renderStaff(root) {
       await api("/api/staff?id=" + editing.staff_id, "PUT", data);
       toast("Staff updated."); editingRecord = null; render();
     } else {
+      data.staff_code = "STF-" + Date.now().toString().slice(-6); // sinh ngầm, không hiển thị
       data.is_active = 1;
       await api("/api/staff", "POST", data);
       toast("Staff added."); render();
@@ -450,9 +481,9 @@ function renderStaff(root) {
   }, editing ? [{ key: "is_active", label: "Currently active (uncheck if no longer working here)", checked: editing.is_active }] : null,
   { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
-  root.appendChild(filterBar("staff", { placeholder: "Search by code, name, position…", activeOnlyToggle: true }));
+  root.appendChild(filterBar("staff", { placeholder: "Search by name, position…", activeOnlyToggle: true }));
 
-  let list = cache.staff.filter(s => matchesText(filters.staff.q, s.staff_code, s.full_name, s.role));
+  let list = cache.staff.filter(s => matchesText(filters.staff.q, s.full_name, s.role));
   if (filters.staff.activeOnly) list = list.filter(s => s.is_active);
   const card = document.createElement("div");
   card.className = "card";
@@ -463,12 +494,14 @@ function renderStaff(root) {
     card.innerHTML += "<div class='empty'>No staff match your filter.</div>";
   } else {
     const rows = list.map(s => `<tr>
-      <td>${s.staff_code}</td><td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
+      <td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
       <td class="money">${aud(s.avg_hourly_rate_cents)}/hr</td>
-      <td>${s.management_fee_rate_pct ?? s.management_fee_rate}%</td><td>${s.user_role}</td>
+      <td>${s.management_fee_rate_pct ?? s.management_fee_rate}%</td>
+      <td>${s.start_date || "—"}</td><td>${s.end_date || "—"}</td>
+      <td>${s.user_role}</td>
       <td><button class="ghost" data-edit="${s.staff_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Code</th><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee %</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee %</th><th>Start Date</th><th>End Date</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -857,7 +890,7 @@ function renderInvoices(root) {
       { key: "base_amount_aud", label: "Subtotal (AUD)", type: "number", step:"0.01", default: fromCents(editing.base_amount_cents) },
       { key: "transfer_fee_aud", label: "Additional Transfer Fee (AUD)", type: "number", step:"0.01", default: fromCents(editing.transfer_fee_cents) },
       { key: "sent_date", label: "Sent Date", type: "date", default: editing.sent_date },
-      { key: "due_date", label: "Due Date", type: "date", default: editing.due_date },
+      { key: "due_date", label: "Due Date (leave blank to auto-calc: Sent Date + Client's Payment Terms)", type: "date", default: editing.due_date },
       { key: "paid_date", label: "Payment Received Date", type: "date", default: editing.paid_date },
       { key: "status", label: "Status", type: "select", options: ["delivered_pending","sent_within_terms","overdue","paid"],
         labels:{delivered_pending:"Draft (Pending)",sent_within_terms:"Sent (Current)",overdue:"Overdue",paid:"Paid"}, default: editing.status },
@@ -865,6 +898,13 @@ function renderInvoices(root) {
       data.base_amount_cents = toCents(data.base_amount_aud); delete data.base_amount_aud;
       data.transfer_fee_cents = toCents(data.transfer_fee_aud); delete data.transfer_fee_aud;
       data.total_amount_cents = data.base_amount_cents + data.transfer_fee_cents;
+      if (data.sent_date && !data.due_date) {
+        const client = cache.clients.find(c => c.client_id === editing.client_id);
+        const terms = client?.payment_terms_days ?? 30;
+        const d = new Date(data.sent_date + "T00:00:00");
+        d.setDate(d.getDate() + terms);
+        data.due_date = d.toISOString().slice(0, 10);
+      }
       await api("/api/invoices?id=" + editing.invoice_id, "PUT", data);
       toast("Invoice updated."); editingRecord = null; render();
     }, [{ key: "reminder_sent", label: "Day-7 reminder sent", checked: editing.reminder_sent }],
@@ -995,6 +1035,7 @@ async function buildInvoiceDoc(invoiceId) {
   // ---- Bill to (khách hàng) ----
   sectionHeader("Bill to");
   row("Company", d.client_name);
+  if (d.client_address) row("Address", d.client_address);
   row("Email", d.client_email);
   if (d.project_name) row("Project", d.project_name);
 
@@ -1116,16 +1157,20 @@ function exportExcelReport() {
   const wb = XLSX.utils.book_new();
 
   const clientsRows = cache.clients.map(c => ({
-    Code: c.client_code, Company: c.company_name, Contact: c.contact_person || "",
-    Email: c.email || "", Phone: c.phone || "",
+    Company: c.company_name, Contact: c.contact_person || "",
+    Email: c.email || "", "Accountant Email": c.accountant_email || "", Phone: c.phone || "",
+    Address: c.address || "",
+    "Service Type": c.service_type || "full", "Client Status": c.client_status || "active",
+    "Payment Terms (days)": c.payment_terms_days ?? 30,
     "Default Fee": c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree"),
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(clientsRows), "Clients");
 
   const staffRows = cache.staff.map(s => ({
-    Code: s.staff_code, Name: s.full_name, Position: s.role,
+    Name: s.full_name, Position: s.role,
     "Avg Rate (AUD/hr)": money(s.avg_hourly_rate_cents),
     "Mgmt Fee %": s.management_fee_rate_pct ?? s.management_fee_rate,
+    "Start Date": s.start_date || "", "End Date": s.end_date || "",
     "System Role": s.user_role, Active: s.is_active ? "Yes" : "No",
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(staffRows), "Staff");
