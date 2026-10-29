@@ -1,4 +1,8 @@
 -- ============================================================
+-- ⚠️ CẢNH BÁO: File này XÓA SẠCH toàn bộ dữ liệu rồi tạo lại bảng (DROP TABLE).
+-- CHỈ chạy khi cài mới hoàn toàn. Database đang dùng KHÔNG cần chạy lại —
+-- worker.js tự bổ sung các cột mới khi khởi động.
+-- ============================================================
 -- ECOFREE — DATABASE SCHEMA cho Cloudflare D1 (SQLite dialect)
 -- PHIÊN BẢN ĐÃ SỬA LỖI THỨ TỰ BẢNG (v2)
 -- ============================================================
@@ -52,7 +56,8 @@ CREATE TABLE staff (
   staff_id              INTEGER PRIMARY KEY AUTOINCREMENT,
   staff_code            TEXT UNIQUE NOT NULL, -- nội bộ, không hiển thị trên giao diện
   full_name             TEXT NOT NULL,
-  role                  TEXT NOT NULL CHECK (role IN ('estimator','drafter','admin','marketing')),
+  nickname              TEXT, -- tên ngắn gọn, dùng khi chọn NV trong Đơn hàng
+  role                 TEXT NOT NULL CHECK (role IN ('estimator','drafter','admin','marketing')),
   bank_info             TEXT,
   avg_hourly_rate_cents INTEGER NOT NULL,
   management_fee_rate   INTEGER NOT NULL CHECK (management_fee_rate IN (20,30)), -- lịch sử, không dùng nữa
@@ -79,7 +84,8 @@ CREATE TABLE quotations (
   fee_mode               TEXT, -- 'client' | 'ecofree' | 'none' (không có phí)
   total_amount_cents    INTEGER NOT NULL DEFAULT 0,
   notes                 TEXT,
-  status                TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','approved','rejected'))
+  status                TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','approved','rejected')),
+  is_direct             INTEGER NOT NULL DEFAULT 0 -- 1 = báo giá ẩn, tự tạo khi lập Đơn hàng trực tiếp (không hiện ở tab Quotes)
 );
 
 -- ------------------------------------------------------------
@@ -164,6 +170,8 @@ CREATE TABLE tasks (
   task_name             TEXT NOT NULL,
   staff_id              INTEGER NOT NULL REFERENCES staff(staff_id),
   hours                 REAL NOT NULL DEFAULT 0,
+  work_start            TEXT, -- khung thời gian làm (tham khảo): 'YYYY-MM-DD HH:MM'
+  work_end              TEXT,
   client_rate_cents     INTEGER NOT NULL,
   staff_rate_cents      INTEGER NOT NULL,
   status                TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','completed')),
