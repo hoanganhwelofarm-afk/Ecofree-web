@@ -4,11 +4,11 @@
 
 const TABLES = {
   clients: { pk: "client_id", columns: ["client_code","company_name","contact_person","email","phone","address","accountant_email","service_type","client_status","payment_terms_days","client_pays_fee_default","default_fee_mode"] },
-  staff: { pk: "staff_id", columns: ["staff_code","full_name","role","bank_info","avg_hourly_rate_cents","management_fee_rate","management_fee_rate_pct","start_date","end_date","user_role","is_active"] },
-  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","fee_mode","total_amount_cents","notes","status"] },
+  staff: { pk: "staff_id", columns: ["staff_code","full_name","nickname","role","bank_info","avg_hourly_rate_cents","management_fee_rate","management_fee_rate_pct","start_date","end_date","user_role","is_active"] },
+  quotations: { pk: "quotation_id", columns: ["quotation_code","client_id","project_name","created_date","valid_until","contract_type","fee_payer","fee_mode","total_amount_cents","notes","status","is_direct"] },
   orders: { pk: "order_id", columns: ["order_code","quotation_id","client_id","project_name","contract_type","fee_payer","fee_mode","start_date","deadline","estimated_hours","rate_estimated","total_amount_cents","notes","status"] },
   order_staff_payout: { pk: "id", columns: ["order_id","staff_id","fixed_amount_cents","delivered_date","completed"] },
-  tasks: { pk: "task_id", columns: ["order_id","task_name","staff_id","hours","client_rate_cents","staff_rate_cents","status","billing_cycle_id"] },
+  tasks: { pk: "task_id", columns: ["order_id","task_name","staff_id","hours","work_start","work_end","client_rate_cents","staff_rate_cents","status","billing_cycle_id"] },
   billing_cycles: { pk: "cycle_id", columns: ["order_id","period_start","period_end","total_client_amount_cents","total_staff_amount_cents","transfer_fee_cents","invoice_id"] },
   invoices: { pk: "invoice_id", columns: ["invoice_code","order_id","client_id","base_amount_cents","transfer_fee_cents","total_amount_cents","rate_actual","status","sent_date","due_date","reminder_sent","paid_date"] },
   payouts: { pk: "payout_id", columns: ["staff_id","order_id","invoice_id","case_type","gross_amount_cents","management_fee_cents","tax_withheld_cents","net_amount_cents","net_amount_vnd","rate_payout","payout_date","status"] }
@@ -43,9 +43,10 @@ const MIGRATIONS = {
     client_status: "TEXT DEFAULT 'active'", payment_terms_days: "INTEGER DEFAULT 30",
     default_fee_mode: "TEXT DEFAULT 'client'",
   },
-  staff: { management_fee_rate_pct: "REAL", start_date: "TEXT", end_date: "TEXT" },
-  quotations: { fee_mode: "TEXT", notes: "TEXT" },
+  staff: { management_fee_rate_pct: "REAL", start_date: "TEXT", end_date: "TEXT", nickname: "TEXT" },
+  quotations: { fee_mode: "TEXT", notes: "TEXT", is_direct: "INTEGER NOT NULL DEFAULT 0" },
   orders: { project_name: "TEXT", fee_mode: "TEXT", total_amount_cents: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT" },
+  tasks: { work_start: "TEXT", work_end: "TEXT" },
 };
 let schemaReady = null;
 function ensureSchema(env) {
@@ -101,6 +102,7 @@ async function handleApi(request, env, url) {
   const resource = parts[1];
 
   if (resource === "approve-quotation" && request.method === "POST") return approveQuotation(request, env);
+  if (resource === "create-job" && request.method === "POST") return createJobDirect(request, env);
   if (resource === "calc-payout" && request.method === "POST") return calcPayout(request, env);
   if (resource === "report" && request.method === "GET") return getReport(request, env, url);
   if (resource === "close-billing-cycle" && request.method === "POST") return closeBillingCycle(request, env);
@@ -176,6 +178,33 @@ async function approveQuotation(request, env) {
          nz(start_date), q.total_amount_cents ?? 0, nz(q.notes)).run();
   await env.DB.prepare("UPDATE quotations SET status = 'approved' WHERE quotation_id = ?").bind(quotation_id).run();
   return json({ success: true, order_id: res.meta.last_row_id, project_name: q.project_name });
+}
+
+// Tạo Đơn hàng trực tiếp (không qua Báo giá).
+// Database yêu cầu mỗi Đơn hàng phải gắn 1 Báo giá gốc -> hệ thống tự tạo 1 "báo giá ẩn"
+// (is_direct = 1, trạng thái Đã duyệt) để giữ nguyên toàn bộ liên kết & logic cũ. Báo giá ẩn không hiện ở tab Quotes.
+async function createJobDirect(request, env) {
+  const b = await request.json();
+  if (!b.client_id || !b.project_name || !["fixed", "hourly"].includes(b.contract_type)) {
+    return json({ error: "Thiếu Khách hàng, Tên dự án hoặc Hình thức hợp đồng" }, 400);
+  }
+  const client = await env.DB.prepare("SELECT * FROM clients WHERE client_id = ?").bind(b.client_id).first();
+  if (!client) return json({ error: "Không tìm thấy khách hàng" }, 404);
+  const feeModeVal = b.fee_mode || client.default_fee_mode || (client.client_pays_fee_default ? "client" : "ecofree");
+  const total = parseInt(b.total_amount_cents) || 0;
+
+  const qRes = await env.DB.prepare(
+    `INSERT INTO quotations (quotation_code, client_id, project_name, created_date, contract_type, fee_mode, total_amount_cents, notes, status, is_direct)
+     VALUES (?, ?, ?, COALESCE(?, date('now')), ?, ?, ?, ?, 'approved', 1)`
+  ).bind(genCode("Q"), b.client_id, b.project_name, nz(b.start_date), b.contract_type, feeModeVal, total, nz(b.notes)).run();
+
+  const oRes = await env.DB.prepare(
+    `INSERT INTO orders (order_code, quotation_id, client_id, project_name, contract_type, fee_mode, start_date, deadline, estimated_hours, rate_estimated, total_amount_cents, notes, status)
+     VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), ?, ?, 1, ?, ?, 'in_progress')`
+  ).bind(genCode("JOB"), qRes.meta.last_row_id, b.client_id, b.project_name, b.contract_type, feeModeVal,
+         nz(b.start_date), nz(b.deadline), nz(b.estimated_hours), total, nz(b.notes)).run();
+
+  return json({ success: true, order_id: oRes.meta.last_row_id, project_name: b.project_name });
 }
 
 async function closeBillingCycle(request, env) {
@@ -268,7 +297,7 @@ async function getInvoiceDetail(request, env, url) {
       const { results: tasks } = await env.DB.prepare(
         `SELECT t.task_name, t.hours, t.client_rate_cents, s.full_name AS staff_name
          FROM tasks t JOIN staff s ON s.staff_id = t.staff_id
-         WHERE t.billing_cycle_id = ?`
+         WHERE t.billing_cycle_id = ? ORDER BY t.task_id`
       ).bind(cycle.cycle_id).all();
       lineItems = tasks.map((t) => ({
         task_name: t.task_name, staff_name: t.staff_name, hours: t.hours,
