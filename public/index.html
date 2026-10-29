@@ -8,6 +8,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- Bộ chọn ngày: hiển thị dd/mm/yyyy, vẫn lưu yyyy-mm-dd trong database -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
 <style>
   :root{
     --bg:#F6F7F3;
@@ -219,10 +222,27 @@ function formatVND(vnd) {
   if (vnd === null || vnd === undefined || isNaN(vnd)) return "—";
   return Math.round(vnd).toLocaleString("vi-VN") + " ₫";
 }
+// ---------- NGÀY THÁNG ----------
+// Database luôn lưu dạng yyyy-mm-dd (để sắp xếp & lọc đúng). Giao diện luôn hiển thị dd/mm/yyyy.
+function isoOf(d) {
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function todayISO() { return isoOf(new Date()); } // theo giờ máy người dùng, không lệch múi giờ
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
+}
+function enhanceDateInputs(root) {
+  if (!window.flatpickr) return;
+  root.querySelectorAll('input[type="date"]').forEach(el => flatpickr(el, {
+    dateFormat: "Y-m-d", altInput: true, altFormat: "d/m/Y", allowInput: true,
+  }));
+}
 function daysBetween(dateStr) {
   if (!dateStr) return null;
   const d1 = new Date(dateStr + "T00:00:00");
-  const d2 = new Date(new Date().toISOString().slice(0,10) + "T00:00:00");
+  const d2 = new Date(todayISO() + "T00:00:00");
   return Math.round((d2 - d1) / 86400000);
 }
 function clientName(id) {
@@ -236,7 +256,7 @@ function staffName(id) {
 function orderLabel(id) {
   const o = cache.orders.find(x => x.order_id == id);
   if (!o) return "—";
-  return o.order_code + " (" + clientName(o.client_id) + ")";
+  return (o.project_name || "Job #" + o.order_id) + " (" + clientName(o.client_id) + ")";
 }
 
 async function loadAll() {
@@ -285,6 +305,7 @@ function renderCurrentTabOnly() {
     reports: renderReports,
   };
   renderers[currentTab](content);
+  enhanceDateInputs(content);
 }
 
 // ---------- TỔNG QUAN ----------
@@ -296,7 +317,7 @@ function renderTongQuan(root) {
   });
   const overdue = cache.invoices.filter(i => {
     if (i.status === "paid") return false;
-    return i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10));
+    return i.due_date && new Date(i.due_date) < new Date(todayISO());
   });
 
   const card1 = document.createElement("div");
@@ -319,7 +340,7 @@ function renderTongQuan(root) {
     const rows = overdue.map(i => `<tr>
       <td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
       <td class="money">${aud(i.total_amount_cents)}</td>
-      <td>${i.due_date}</td>
+      <td>${fmtDate(i.due_date)}</td>
       <td><span class="badge danger">Overdue</span></td>
     </tr>`).join("");
     card2.innerHTML += `<table><thead><tr><th>Invoice</th><th>Client</th><th>Total</th><th>Due Date</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
@@ -351,7 +372,7 @@ function buildInvoiceReminderTable(list) {
       ? `<a class="ghost" style="text-decoration:none;display:inline-block;padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-size:13px;" href="mailto:${sendToEmail}?subject=Payment Reminder — Invoice ${i.invoice_code}&body=Dear ${encodeURIComponent(client.company_name)}, this is a friendly reminder that invoice ${i.invoice_code} was sent 7 days ago. Please confirm receipt and arrange payment at your earliest convenience. Thank you." target="_blank">Draft Reminder Email</a>`
       : "<span class='empty'>Client has no email on file</span>";
     tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
-      <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date}</td>
+      <td class="money">${aud(i.total_amount_cents)}</td><td>${fmtDate(i.sent_date)}</td>
       <td class="actions-cell">${mailLink}<button class="ghost" data-mark="${i.invoice_id}">Mark Reminder Sent</button></td>`;
     tbody.appendChild(tr);
   });
@@ -397,8 +418,7 @@ function renderClients(root) {
       await api("/api/clients?id=" + editing.client_id, "PUT", data);
       toast("Client updated."); editingRecord = null; render();
     } else {
-      data.client_code = "CL-" + Date.now().toString().slice(-6); // sinh ngầm, không hiển thị
-      await api("/api/clients", "POST", data);
+      await api("/api/clients", "POST", data); // mã khách hàng do máy chủ tự sinh ngầm
       toast("Client added."); render();
     }
   }, null,
@@ -476,8 +496,7 @@ function renderStaff(root) {
       await api("/api/staff?id=" + editing.staff_id, "PUT", data);
       toast("Staff updated."); editingRecord = null; render();
     } else {
-      data.staff_code = "STF-" + Date.now().toString().slice(-6); // sinh ngầm, không hiển thị
-      data.is_active = 1;
+      data.is_active = 1; // mã nhân viên do máy chủ tự sinh ngầm
       await api("/api/staff", "POST", data);
       toast("Staff added."); render();
     }
@@ -500,7 +519,7 @@ function renderStaff(root) {
       <td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
       <td class="money">${aud(s.avg_hourly_rate_cents)}/hr</td>
       <td>${s.management_fee_rate_pct ?? s.management_fee_rate}%</td>
-      <td>${s.start_date || "—"}</td><td>${s.end_date || "—"}</td>
+      <td>${fmtDate(s.start_date)}</td><td>${fmtDate(s.end_date)}</td>
       <td>${s.user_role}</td>
       <td><button class="ghost" data-edit="${s.staff_id}">Edit</button></td>
     </tr>`).join("");
@@ -524,11 +543,10 @@ function renderQuotations(root) {
   if (editing && editing.status === "approved") {
     root.appendChild(warnCard("This quote has already been approved into a Job — editing it here will NOT update the existing job. To change the job's figures, edit it directly on the Jobs tab."));
   }
-  root.appendChild(formCard(editing ? "Edit Quote: " + editing.quotation_code : "Create New Quote", [
-    { key: "quotation_code", label: "Quote Code", type: "text", required: true, default: editing?.quotation_code },
+  root.appendChild(formCard(editing ? "Edit Quote: " + editing.project_name : "Create New Quote", [
     { key: "client_id", label: "Client", type: "select", options: cache.clients.map(c=>c.client_id), labels: Object.fromEntries(cache.clients.map(c=>[c.client_id,c.company_name])), required: true, default: editing?.client_id },
     { key: "project_name", label: "Project Name", type: "text", required: true, default: editing?.project_name },
-    { key: "created_date", label: "Date Created", type: "date", default: editing?.created_date || new Date().toISOString().slice(0,10) },
+    { key: "created_date", label: "Date Created", type: "date", default: editing?.created_date || todayISO() },
     { key: "valid_until", label: "Quote Valid Until", type: "date", default: editing?.valid_until },
     { key: "contract_type", label: "Contract Type", type: "select", options: ["fixed","hourly"], labels:{fixed:"Fixed Price",hourly:"Hourly"}, default: editing?.contract_type },
     { key: "fee_mode", label: "Transfer Fee", type: "select", options: ["","client","ecofree","none"],
@@ -553,14 +571,14 @@ function renderQuotations(root) {
   }, null, { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
   root.appendChild(filterBar("quotations", {
-    placeholder: "Search by code, project name, client…",
+    placeholder: "Search by project name, client…",
     statusOptions: [
       { value: "draft", label: "Draft" }, { value: "sent", label: "Sent" },
       { value: "approved", label: "Approved" }, { value: "rejected", label: "Rejected" },
     ],
   }));
 
-  let list = cache.quotations.filter(q => matchesText(filters.quotations.q, q.quotation_code, q.project_name, clientName(q.client_id)));
+  let list = cache.quotations.filter(q => matchesText(filters.quotations.q, q.project_name, clientName(q.client_id)));
   if (filters.quotations.status) list = list.filter(q => q.status === filters.quotations.status);
 
   const card = document.createElement("div");
@@ -572,13 +590,13 @@ function renderQuotations(root) {
     card.innerHTML += "<div class='empty'>No quotes match your filter.</div>";
   } else {
     const tbl = document.createElement("table");
-    tbl.innerHTML = "<thead><tr><th>Code</th><th>Client</th><th>Project</th><th>Type</th><th>Amount</th><th>Status</th><th></th></tr></thead>";
+    tbl.innerHTML = "<thead><tr><th>Project</th><th>Client</th><th>Created</th><th>Type</th><th>Amount</th><th>Status</th><th></th></tr></thead>";
     const tbody = document.createElement("tbody");
     list.forEach(q => {
       const tr = document.createElement("tr");
       const statusBadge = q.status === "approved" ? "<span class='badge ok'>Approved</span>" : "<span class='badge muted'>" + q.status + "</span>";
       const approveBtn = q.status !== "approved" ? `<button class="primary" data-approve="${q.quotation_id}">Approve → Create Job</button>` : "";
-      tr.innerHTML = `<td>${q.quotation_code}</td><td>${clientName(q.client_id)}</td><td>${q.project_name}</td>
+      tr.innerHTML = `<td>${q.project_name}</td><td>${clientName(q.client_id)}</td><td>${fmtDate(q.created_date)}</td>
         <td>${q.contract_type === "fixed" ? "Fixed Price" : "Hourly"}</td>
         <td class="money">${aud(q.total_amount_cents)}</td><td>${statusBadge}</td>
         <td class="actions-cell">${approveBtn}<button class="ghost" data-edit="${q.quotation_id}">Edit</button></td>`;
@@ -589,13 +607,12 @@ function renderQuotations(root) {
       const approveId = e.target.getAttribute("data-approve");
       const editId = e.target.getAttribute("data-edit");
       if (approveId) {
-        const order_code = window.prompt("Enter the Job Code for the new job:", "");
-        if (!order_code) { toast("You must enter a Job Code to continue.", true); return; }
+        e.target.disabled = true; // chống bấm 2 lần tạo trùng đơn hàng
         try {
-          const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(approveId), order_code });
-          toast("Job created: " + res.order_code);
+          const res = await api("/api/approve-quotation", "POST", { quotation_id: parseInt(approveId), start_date: todayISO() });
+          toast("Job created: " + (res.project_name || ""));
           render();
-        } catch (err) { toast(err.message, true); }
+        } catch (err) { e.target.disabled = false; toast(err.message, true); }
       }
       if (editId) { editingRecord = { table: "quotations", id: parseInt(editId) }; render(); }
     });
@@ -607,7 +624,7 @@ function renderQuotations(root) {
 // ---------- ĐƠN HÀNG ----------
 function renderOrders(root) {
   root.appendChild(filterBar("orders", {
-    placeholder: "Search by code, client…",
+    placeholder: "Search by project, client…",
     statusOptions: [{ value: "in_progress", label: "In Progress" }, { value: "completed", label: "Completed" }],
     typeOptions: [{ value: "fixed", label: "Fixed Price" }, { value: "hourly", label: "Hourly" }],
   }));
@@ -620,7 +637,7 @@ function renderOrders(root) {
     root.appendChild(card);
     return;
   }
-  let list = cache.orders.filter(o => matchesText(filters.orders.q, o.order_code, clientName(o.client_id)));
+  let list = cache.orders.filter(o => matchesText(filters.orders.q, o.project_name, clientName(o.client_id)));
   if (filters.orders.status) list = list.filter(o => o.status === filters.orders.status);
   if (filters.orders.type) list = list.filter(o => o.contract_type === filters.orders.type);
 
@@ -630,15 +647,15 @@ function renderOrders(root) {
     return;
   }
   const rows = list.map(o => `<tr>
-    <td style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}" data-select="${o.order_id}">${o.order_code}</td>
+    <td style="cursor:pointer;${selectedOrderId==o.order_id?'background:var(--accent-soft);':''}" data-select="${o.order_id}">${o.project_name || "Job #" + o.order_id}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;">${clientName(o.client_id)}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;">${o.contract_type === "fixed" ? "Fixed Price" : "Hourly"}</td>
-    <td data-select="${o.order_id}" style="cursor:pointer;">${o.start_date || "—"}</td>
-    <td data-select="${o.order_id}" style="cursor:pointer;">${o.deadline || "—"}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${fmtDate(o.start_date)}</td>
+    <td data-select="${o.order_id}" style="cursor:pointer;">${fmtDate(o.deadline)}</td>
     <td data-select="${o.order_id}" style="cursor:pointer;"><span class="badge ${o.status === "completed" ? "ok" : "muted"}">${o.status === "completed" ? "Completed" : "In Progress"}</span></td>
     <td><button class="ghost" data-edit="${o.order_id}">Edit</button></td>
   </tr>`).join("");
-  card.innerHTML += `<table><thead><tr><th>Code</th><th>Client</th><th>Type</th><th>Start Date</th><th>Deadline</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  card.innerHTML += `<table><thead><tr><th>Project</th><th>Client</th><th>Type</th><th>Start Date</th><th>Deadline</th><th>Status</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   root.appendChild(card);
   card.querySelector("table").addEventListener("click", (e) => {
     const editId = e.target.getAttribute("data-edit");
@@ -655,8 +672,31 @@ function renderOrders(root) {
   if (!order) { selectedOrderId = null; return; }
 
   const detailHeader = document.createElement("div");
-  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Job Details: ${order.order_code} — ${clientName(order.client_id)}${order.project_name ? " — " + order.project_name : ""}</h1>`;
+  detailHeader.innerHTML = `<h1 style="font-size:17px;margin-top:24px;">Job Details: ${order.project_name || "Job #" + order.order_id} — ${clientName(order.client_id)}</h1>`;
   root.appendChild(detailHeader);
+
+  // Form sửa đơn hàng đặt NGAY dưới tiêu đề & tự cuộn tới, để bấm "Edit" là thấy ngay
+  const editingOrder = editingRecord && editingRecord.table === "orders" && editingRecord.id === order.order_id;
+  if (editingOrder) {
+    const editCard = formCard("Edit Job Details", [
+      { key: "project_name", label: "Project Name", type: "text", required: true, default: order.project_name },
+      { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
+      { key: "start_date", label: "Start Date", type: "date", default: order.start_date },
+      { key: "deadline", label: "Handover Deadline", type: "date", default: order.deadline },
+      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "number", step:"0.25", default: order.estimated_hours },
+      { key: "rate_estimated", label: "Estimated Exchange Rate (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
+      { key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: order.status },
+      { key: "notes", label: "Notes", type: "textarea", default: order.notes },
+    ], async (data) => {
+      if (data.total_amount_aud !== undefined) data.total_amount_cents = toCents(data.total_amount_aud);
+      delete data.total_amount_aud;
+      if (data.notes === undefined) data.notes = ""; // cho phép xóa trắng ghi chú
+      await api("/api/orders?id=" + order.order_id, "PUT", data);
+      toast("Job updated."); editingRecord = null; render();
+    }, null, { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } });
+    root.appendChild(editCard);
+    setTimeout(() => editCard.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   // Ô tổng giá trị đã báo giá — dùng chung cho cả 2 loại hợp đồng, để đối chiếu không vượt báo giá
   const quotedTotal = order.total_amount_cents || 0;
@@ -677,24 +717,6 @@ function renderOrders(root) {
     ${overBudget ? "<div class='badge danger'>⚠️ Exceeds the quoted amount!</div>" : ""}
     ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Notes from quote:</b> ${order.notes}</div>` : ""}`;
   root.appendChild(budgetCard);
-
-  const editingOrder = editingRecord && editingRecord.table === "orders" && editingRecord.id === order.order_id;
-  if (editingOrder) {
-    root.appendChild(formCard("Edit Job Details", [
-      { key: "order_code", label: "Job Code", type: "text", required: true, default: order.order_code },
-      { key: "project_name", label: "Project Name", type: "text", default: order.project_name },
-      { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
-      { key: "deadline", label: "Handover Deadline", type: "date", default: order.deadline },
-      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "number", step:"0.25", default: order.estimated_hours },
-      { key: "rate_estimated", label: "Estimated Exchange Rate (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
-      { key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: order.status },
-      { key: "notes", label: "Notes", type: "textarea", default: order.notes },
-    ], async (data) => {
-      data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
-      await api("/api/orders?id=" + order.order_id, "PUT", data);
-      toast("Job updated."); editingRecord = null; render();
-    }, null, { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } }));
-  }
 
   if (order.contract_type === "fixed") renderFixedOrderDetail(root, order);
   else renderHourlyOrderDetail(root, order);
@@ -727,7 +749,7 @@ function renderFixedOrderDetail(root, order) {
     list.forEach(x => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${staffName(x.staff_id)}</td><td class="money">${aud(x.fixed_amount_cents)}</td>
-        <td>${x.delivered_date || "—"}</td>
+        <td>${fmtDate(x.delivered_date)}</td>
         <td>${x.completed ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
         <td>${x.completed ? "—" : `<button class="ghost" data-done="${x.id}">Mark Complete</button>`}</td>`;
       tbody.appendChild(tr);
@@ -846,7 +868,7 @@ function renderHourlyOrderDetail(root, order) {
   closeCard.innerHTML = `<h2>Progress Claim</h2>
     <div class="grid">
       <div><label>From</label><input type="date" id="cycle-from"></div>
-      <div><label>To</label><input type="date" id="cycle-to" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div><label>To</label><input type="date" id="cycle-to" value="${todayISO()}"></div>
     </div>
     <button class="primary" id="close-cycle-btn">Submit Progress Claim (collects completed, unclaimed tasks)</button>`;
   root.appendChild(closeCard);
@@ -869,7 +891,7 @@ function renderHourlyOrderDetail(root, order) {
     cyclesCard.innerHTML += "<div class='empty'>No progress claims yet.</div>";
   } else {
     const rows = cycles.map(c => `<tr>
-      <td>#${c.cycle_id}</td><td>${c.period_start} → ${c.period_end}</td>
+      <td>#${c.cycle_id}</td><td>${fmtDate(c.period_start)} → ${fmtDate(c.period_end)}</td>
       <td class="money">${aud(c.total_client_amount_cents)}</td>
       <td class="money">${aud(c.total_staff_amount_cents)}</td>
       <td>${c.invoice_id ? "<span class='badge ok'>Invoice #"+c.invoice_id+" created</span>" : "<span class='badge warn'>No invoice yet</span>"}</td>
@@ -906,7 +928,7 @@ function renderInvoices(root) {
         const terms = client?.payment_terms_days ?? 30;
         const d = new Date(data.sent_date + "T00:00:00");
         d.setDate(d.getDate() + terms);
-        data.due_date = d.toISOString().slice(0, 10);
+        data.due_date = isoOf(d);
       }
       await api("/api/invoices?id=" + editing.invoice_id, "PUT", data);
       toast("Invoice updated."); editingRecord = null; render();
@@ -940,13 +962,13 @@ function renderInvoices(root) {
       const tr = document.createElement("tr");
       let statusBadge;
       if (i.status === "paid") statusBadge = "<span class='badge ok'>Paid</span>";
-      else if (i.due_date && new Date(i.due_date) < new Date(new Date().toISOString().slice(0,10))) statusBadge = "<span class='badge danger'>Overdue</span>";
+      else if (i.due_date && new Date(i.due_date) < new Date(todayISO())) statusBadge = "<span class='badge danger'>Overdue</span>";
       else statusBadge = "<span class='badge muted'>Current</span>";
       const d = daysBetween(i.sent_date);
       const remindBadge = (!i.reminder_sent && d !== null && d >= 7 && i.status !== "paid") ? " <span class='badge warn'>Reminder Due</span>" : "";
       const payBtn = i.status !== "paid" ? `<button class="ghost" data-pay="${i.invoice_id}">Mark as Paid</button>` : "";
       tr.innerHTML = `<td>${i.invoice_code}</td><td>${clientName(i.client_id)}</td>
-        <td class="money">${aud(i.total_amount_cents)}</td><td>${i.sent_date || "—"}</td><td>${i.due_date || "—"}</td>
+        <td class="money">${aud(i.total_amount_cents)}</td><td>${fmtDate(i.sent_date)}</td><td>${fmtDate(i.due_date)}</td>
         <td>${statusBadge}${remindBadge}</td>
         <td class="actions-cell">${payBtn}<button class="ghost" data-edit="${i.invoice_id}">Edit</button><button class="ghost" data-pdf="${i.invoice_id}">📄 Preview PDF</button></td>`;
       tbody.appendChild(tr);
@@ -958,7 +980,7 @@ function renderInvoices(root) {
       const pdfId = e.target.getAttribute("data-pdf");
       if (payId) {
         try {
-          await api("/api/invoices?id=" + payId, "PUT", { status: "paid", paid_date: new Date().toISOString().slice(0,10) });
+          await api("/api/invoices?id=" + payId, "PUT", { status: "paid", paid_date: todayISO() });
           toast("Marked as paid. The matching payout will be auto-created on the Staff Payouts tab.");
           render();
         } catch (err) { toast(err.message, true); }
@@ -1025,8 +1047,8 @@ async function buildInvoiceDoc(invoiceId) {
   doc.text("INVOICE", L, y); y += 10;
 
   row("Invoice No.", inv.invoice_code);
-  row("Invoice Date", inv.sent_date || "-");
-  row("Due Date", inv.due_date || "-");
+  row("Invoice Date", inv.sent_date ? fmtDate(inv.sent_date) : "-");
+  row("Due Date", inv.due_date ? fmtDate(inv.due_date) : "-");
 
   // ---- From (thông tin cố định của người gửi) ----
   sectionHeader("From");
@@ -1150,7 +1172,12 @@ async function previewInvoicePDF(invoiceId) {
 
 // ---------- Xuất báo cáo Excel nhiều sheet (chỉ đọc dữ liệu, không thay đổi gì) ----------
 function sheetOrPlaceholder(rows) {
-  return rows.length > 0 ? XLSX.utils.json_to_sheet(rows) : XLSX.utils.json_to_sheet([{ Info: "No data yet" }]);
+  // dateNF: ô ngày trong Excel hiển thị dd/mm/yyyy nhưng vẫn là ngày thật (sắp xếp/lọc được)
+  return rows.length > 0 ? XLSX.utils.json_to_sheet(rows, { dateNF: "dd/mm/yyyy" }) : XLSX.utils.json_to_sheet([{ Info: "No data yet" }]);
+}
+function xDate(iso) {
+  const m = iso && String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : "";
 }
 function money(cents) {
   return cents === null || cents === undefined ? "" : Number((cents / 100).toFixed(2));
@@ -1173,24 +1200,24 @@ function exportExcelReport() {
     Name: s.full_name, Position: s.role,
     "Avg Rate (AUD/hr)": money(s.avg_hourly_rate_cents),
     "Mgmt Fee %": s.management_fee_rate_pct ?? s.management_fee_rate,
-    "Start Date": s.start_date || "", "End Date": s.end_date || "",
+    "Start Date": xDate(s.start_date), "End Date": xDate(s.end_date),
     "System Role": s.user_role, Active: s.is_active ? "Yes" : "No",
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(staffRows), "Staff");
 
   const quotesRows = cache.quotations.map(q => ({
-    Code: q.quotation_code, Client: clientName(q.client_id), Project: q.project_name,
-    "Created Date": q.created_date, "Valid Until": q.valid_until || "",
+    Project: q.project_name, Client: clientName(q.client_id),
+    "Created Date": xDate(q.created_date), "Valid Until": xDate(q.valid_until),
     Type: q.contract_type === "fixed" ? "Fixed Price" : "Hourly",
     "Quoted Amount (AUD)": money(q.total_amount_cents), Status: q.status,
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(quotesRows), "Quotes");
 
   const jobsRows = cache.orders.map(o => ({
-    Code: o.order_code, Client: clientName(o.client_id), Project: o.project_name || "",
+    Project: o.project_name || "", Client: clientName(o.client_id),
     Type: o.contract_type === "fixed" ? "Fixed Price" : "Hourly",
     "Quoted Amount (AUD)": money(o.total_amount_cents),
-    "Start Date": o.start_date || "", Deadline: o.deadline || "", Status: o.status,
+    "Start Date": xDate(o.start_date), Deadline: xDate(o.deadline), Status: o.status,
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(jobsRows), "Jobs");
 
@@ -1198,7 +1225,7 @@ function exportExcelReport() {
     "Invoice Code": i.invoice_code, Client: clientName(i.client_id), Job: orderLabel(i.order_id),
     "Subtotal (AUD)": money(i.base_amount_cents), "Transfer Fee (AUD)": money(i.transfer_fee_cents),
     "Total (AUD)": money(i.total_amount_cents),
-    "Sent Date": i.sent_date || "", "Due Date": i.due_date || "", "Paid Date": i.paid_date || "",
+    "Sent Date": xDate(i.sent_date), "Due Date": xDate(i.due_date), "Paid Date": xDate(i.paid_date),
     Status: i.status,
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(invoicesRows), "Money Received");
@@ -1208,7 +1235,7 @@ function exportExcelReport() {
     "Gross (AUD)": money(p.gross_amount_cents), "Mgmt Fee (AUD)": money(p.management_fee_cents),
     "Tax 7% (AUD)": money(p.tax_withheld_cents), "Net Pay (AUD)": money(p.net_amount_cents),
     "Exchange Rate": p.rate_payout || "", "VND Amount": p.net_amount_vnd || "",
-    "Payout Date": p.payout_date || "", Status: p.status,
+    "Payout Date": xDate(p.payout_date), Status: p.status,
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(payoutsRows), "Money Paid to Staff");
 
@@ -1226,11 +1253,11 @@ function exportExcelReport() {
   const fixedPayRows = cache.order_staff_payout.map(x => ({
     Job: orderLabel(x.order_id), Staff: staffName(x.staff_id),
     "Fixed Pay (AUD)": money(x.fixed_amount_cents),
-    "Delivered Date": x.delivered_date || "", Completed: x.completed ? "Yes" : "No",
+    "Delivered Date": xDate(x.delivered_date), Completed: x.completed ? "Yes" : "No",
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(fixedPayRows), "Fixed Pay Details");
 
-  XLSX.writeFile(wb, `ecofree-report-${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.writeFile(wb, `ecofree-report-${todayISO()}.xlsx`);
 }
 
 // ---------- PAYOUT ----------
@@ -1325,7 +1352,7 @@ function renderPayouts(root) {
       try {
         if (calcId) { await api("/api/calc-payout", "POST", { payout_id: parseInt(calcId) }); toast("Calculation complete — please review before approving."); render(); }
         if (approveId) { await api("/api/payouts?id=" + approveId, "PUT", { status: "approved" }); toast("Approved."); render(); }
-        if (payId) { await api("/api/payouts?id=" + payId, "PUT", { status: "paid", payout_date: new Date().toISOString().slice(0,10) }); toast("Marked as paid."); render(); }
+        if (payId) { await api("/api/payouts?id=" + payId, "PUT", { status: "paid", payout_date: todayISO() }); toast("Marked as paid."); render(); }
         if (editId) { editingRecord = { table: "payouts", id: parseInt(editId) }; render(); }
       } catch (err) { toast(err.message, true); }
     });
@@ -1337,8 +1364,7 @@ function renderPayouts(root) {
 
 // ---------- BÁO CÁO ----------
 function firstDayOfMonth() {
-  const d = new Date(); d.setDate(1);
-  return d.toISOString().slice(0,10);
+  return todayISO().slice(0, 8) + "01";
 }
 async function renderReports(root) {
   const backupCard = document.createElement("div");
@@ -1361,7 +1387,7 @@ async function renderReports(root) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `ecofree-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `ecofree-backup-${todayISO()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast("Backup downloaded.");
@@ -1379,7 +1405,7 @@ async function renderReports(root) {
   filterRow.className = "grid";
   filterRow.innerHTML = `
     <div><label>From</label><input type="date" id="rep-from" value="${firstDayOfMonth()}"></div>
-    <div><label>To</label><input type="date" id="rep-to" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div><label>To</label><input type="date" id="rep-to" value="${todayISO()}"></div>
   `;
   card.appendChild(filterRow);
   const btn = document.createElement("button");
@@ -1400,7 +1426,7 @@ async function renderReports(root) {
 
       const c1 = document.createElement("div");
       c1.className = "card";
-      c1.innerHTML = `<h2>💰 Net Cash Flow (${from} → ${to})</h2>
+      c1.innerHTML = `<h2>💰 Net Cash Flow (${fmtDate(from)} → ${fmtDate(to)})</h2>
         <table>
           <tbody>
             <tr><td>Revenue Received from Clients</td><td class="money">${aud(r.revenue_received_cents)}</td></tr>
@@ -1419,7 +1445,7 @@ async function renderReports(root) {
         c2.innerHTML += "<div class='empty'>No bad debt cases.</div>";
       } else {
         const rows = r.bad_debt_list.map(b => `<tr>
-          <td>${b.order_code}</td><td>${b.company_name}</td><td>${b.staff_name}</td>
+          <td>${b.project_name || "—"}</td><td>${b.company_name}</td><td>${b.staff_name}</td>
           <td class="money">${aud(b.net_amount_cents)}</td>
         </tr>`).join("");
         c2.innerHTML += `<table><thead><tr><th>Job</th><th>Client</th><th>Supported Staff</th><th>Amount Subsidized by May</th></tr></thead><tbody>${rows}</tbody></table>`;
