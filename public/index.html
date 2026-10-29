@@ -129,6 +129,7 @@ const PAGE_SUBTITLE = {
 let cache = { clients: [], staff: [], quotations: [], orders: [], invoices: [], payouts: [], tasks: [], order_staff_payout: [], billing_cycles: [] };
 let currentTab = "tongquan";
 let selectedOrderId = null;
+let showNewJobForm = false; // bật/tắt form tạo Đơn hàng trực tiếp
 let editingRecord = null; // { table: 'clients', id: 3 }
 let filters = {
   clients: { q: "", status: "" },
@@ -233,11 +234,33 @@ function fmtDate(iso) {
   const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[3]}/${m[2]}/${m[1]}` : iso;
 }
+// Ngày + giờ: lưu 'yyyy-mm-dd HH:MM', hiển thị 'dd/mm/yyyy HH:MM'
+function fmtDateTime(s) {
+  if (!s) return "—";
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!m) return s;
+  return `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}:${m[5]}` : "");
+}
+// Khung thời gian làm của task: cùng ngày -> "29/10/2026 09:00–12:00", khác ngày -> "29/10/2026 09:00 → 30/10/2026 17:00"
+function fmtTimeFrame(start, end) {
+  if (!start && !end) return "—";
+  if (start && end && start.slice(0, 10) === end.slice(0, 10)) return fmtDateTime(start) + "–" + end.slice(11, 16);
+  return fmtDateTime(start) + " → " + fmtDateTime(end);
+}
 function enhanceDateInputs(root) {
   if (!window.flatpickr) return;
   root.querySelectorAll('input[type="date"]').forEach(el => flatpickr(el, {
     dateFormat: "Y-m-d", altInput: true, altFormat: "d/m/Y", allowInput: true,
   }));
+  root.querySelectorAll('input[data-datetime]').forEach(el => flatpickr(el, {
+    enableTime: true, time_24hr: true, dateFormat: "Y-m-d H:i", altInput: true, altFormat: "d/m/Y H:i", allowInput: true,
+  }));
+}
+// Số giờ: luôn hiển thị dạng thập phân 2 chữ số (7.50)
+function fmtHours(h) {
+  if (h === null || h === undefined || h === "") return "—";
+  const n = Number(h);
+  return isNaN(n) ? "—" : n.toFixed(2);
 }
 function daysBetween(dateStr) {
   if (!dateStr) return null;
@@ -252,6 +275,22 @@ function clientName(id) {
 function staffName(id) {
   const s = cache.staff.find(x => x.staff_id == id);
   return s ? s.full_name : "—";
+}
+// Tên ngắn (nickname) — dùng trong Đơn hàng; chưa đặt nickname thì dùng họ tên đầy đủ
+function staffShort(id) {
+  const s = cache.staff.find(x => x.staff_id == id);
+  return s ? (s.nickname || s.full_name) : "—";
+}
+// Ô chọn nhân viên dùng chung trong Đơn hàng (hiển thị nickname)
+function staffSelectField(defaultVal) {
+  return { key: "staff_id", label: "Staff Member", type: "select", required: true, default: defaultVal,
+    options: cache.staff.map(s => s.staff_id),
+    labels: Object.fromEntries(cache.staff.map(s => [s.staff_id, s.nickname || s.full_name])) };
+}
+// Phí chuyển tiền mặc định của khách hàng (dùng chung cho Báo giá & Đơn hàng trực tiếp)
+function clientDefaultFeeMode(clientId) {
+  const c = cache.clients.find(x => x.client_id == clientId);
+  return (c && (c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree"))) || "client";
 }
 function orderLabel(id) {
   const o = cache.orders.find(x => x.order_id == id);
@@ -482,6 +521,7 @@ function renderStaff(root) {
   const editing = editingRecord && editingRecord.table === "staff" ? cache.staff.find(s => s.staff_id === editingRecord.id) : null;
   root.appendChild(formCard(editing ? "Edit Staff: " + editing.full_name : "Add New Staff", [
     { key: "full_name", label: "Full Name", type: "text", required: true, default: editing?.full_name },
+    { key: "nickname", label: "Nickname (short name shown in Jobs)", type: "text", default: editing?.nickname },
     { key: "role", label: "Position", type: "select", options: ["estimator","drafter","admin","marketing"], labels:{estimator:"Estimator",drafter:"Drafter",admin:"Admin",marketing:"Marketing"}, default: editing?.role },
     { key: "avg_hourly_rate_aud", label: "Avg. Hourly Rate (AUD)", type: "number", step: "0.01", default: editing ? fromCents(editing.avg_hourly_rate_cents) : undefined },
     { key: "management_fee_rate_pct", label: "Management Fee Rate (%)", type: "number", step: "0.1", min: "0", max: "100",
@@ -492,6 +532,7 @@ function renderStaff(root) {
   ], async (data) => {
     data.avg_hourly_rate_cents = toCents(data.avg_hourly_rate_aud); delete data.avg_hourly_rate_aud;
     if (editing) {
+      if (data.nickname === undefined) data.nickname = ""; // cho phép xóa nickname
       data.is_active = data.is_active ? 1 : 0;
       await api("/api/staff?id=" + editing.staff_id, "PUT", data);
       toast("Staff updated."); editingRecord = null; render();
@@ -503,9 +544,9 @@ function renderStaff(root) {
   }, editing ? [{ key: "is_active", label: "Currently active (uncheck if no longer working here)", checked: editing.is_active }] : null,
   { editing: !!editing, submitLabel: editing ? "Update" : "Save", onCancel: editing ? () => { editingRecord = null; render(); } : null }));
 
-  root.appendChild(filterBar("staff", { placeholder: "Search by name, position…", activeOnlyToggle: true }));
+  root.appendChild(filterBar("staff", { placeholder: "Search by name, nickname, position…", activeOnlyToggle: true }));
 
-  let list = cache.staff.filter(s => matchesText(filters.staff.q, s.full_name, s.role));
+  let list = cache.staff.filter(s => matchesText(filters.staff.q, s.full_name, s.nickname, s.role));
   if (filters.staff.activeOnly) list = list.filter(s => s.is_active);
   const card = document.createElement("div");
   card.className = "card";
@@ -516,14 +557,14 @@ function renderStaff(root) {
     card.innerHTML += "<div class='empty'>No staff match your filter.</div>";
   } else {
     const rows = list.map(s => `<tr>
-      <td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.role}</td>
+      <td>${s.full_name}${s.is_active ? "" : " <span class='badge muted'>Inactive</span>"}</td><td>${s.nickname || "—"}</td><td>${s.role}</td>
       <td class="money">${aud(s.avg_hourly_rate_cents)}/hr</td>
       <td>${s.management_fee_rate_pct ?? s.management_fee_rate}%</td>
       <td>${fmtDate(s.start_date)}</td><td>${fmtDate(s.end_date)}</td>
       <td>${s.user_role}</td>
       <td><button class="ghost" data-edit="${s.staff_id}">Edit</button></td>
     </tr>`).join("");
-    card.innerHTML += `<table><thead><tr><th>Name</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee %</th><th>Start Date</th><th>End Date</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    card.innerHTML += `<table><thead><tr><th>Name</th><th>Nickname</th><th>Position</th><th>Avg. Rate</th><th>Mgmt Fee %</th><th>Start Date</th><th>End Date</th><th>Role</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
   }
   root.appendChild(card);
   card.addEventListener("click", (e) => {
@@ -556,10 +597,7 @@ function renderQuotations(root) {
     { key: "notes", label: "Notes (project pricing notes — will carry over to the Job when approved)", type: "textarea", default: editing?.notes },
   ], async (data) => {
     data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
-    if (!data.fee_mode) {
-      const c = cache.clients.find(x => x.client_id == data.client_id);
-      data.fee_mode = (c && (c.default_fee_mode || (c.client_pays_fee_default ? "client" : "ecofree"))) || "client";
-    }
+    if (!data.fee_mode) data.fee_mode = clientDefaultFeeMode(data.client_id);
     if (editing) {
       await api("/api/quotations?id=" + editing.quotation_id, "PUT", data);
       toast("Quote updated."); editingRecord = null; render();
@@ -578,13 +616,14 @@ function renderQuotations(root) {
     ],
   }));
 
-  let list = cache.quotations.filter(q => matchesText(filters.quotations.q, q.project_name, clientName(q.client_id)));
+  const realQuotes = cache.quotations.filter(q => !q.is_direct); // bỏ báo giá ẩn của Đơn hàng tạo trực tiếp
+  let list = realQuotes.filter(q => matchesText(filters.quotations.q, q.project_name, clientName(q.client_id)));
   if (filters.quotations.status) list = list.filter(q => q.status === filters.quotations.status);
 
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = "<h2>Quote List</h2>";
-  if (cache.quotations.length === 0) {
+  if (realQuotes.length === 0) {
     card.innerHTML += "<div class='empty'>No quotes yet.</div>";
   } else if (list.length === 0) {
     card.innerHTML += "<div class='empty'>No quotes match your filter.</div>";
@@ -623,6 +662,37 @@ function renderQuotations(root) {
 
 // ---------- ĐƠN HÀNG ----------
 function renderOrders(root) {
+  // ----- Tạo Đơn hàng trực tiếp (không qua Báo giá) -----
+  if (!showNewJobForm) {
+    const newBtn = document.createElement("button");
+    newBtn.className = "primary"; newBtn.textContent = "+ New Job (without Quote)";
+    newBtn.style.marginBottom = "14px";
+    newBtn.onclick = () => { showNewJobForm = true; editingRecord = null; renderCurrentTabOnly(); };
+    root.appendChild(newBtn);
+  } else if (cache.clients.length === 0) {
+    root.appendChild(warnCard("You need to add at least 1 Client before creating a Job."));
+    showNewJobForm = false;
+  } else {
+    root.appendChild(formCard("Create New Job (without Quote)", [
+      { key: "client_id", label: "Client", type: "select", required: true, options: cache.clients.map(c => c.client_id), labels: Object.fromEntries(cache.clients.map(c => [c.client_id, c.company_name])) },
+      { key: "project_name", label: "Project Name", type: "text", required: true },
+      { key: "contract_type", label: "Contract Type", type: "select", options: ["fixed","hourly"], labels: { fixed: "Fixed Price", hourly: "Hourly" } },
+      { key: "fee_mode", label: "Transfer Fee", type: "select", options: ["","client","ecofree","none"],
+        labels: { "": "(Use Client default)", client: "Client Pays 5%", ecofree: "Ecofree Pays 5%", none: "No Fee (Direct Bank Transfer)" } },
+      { key: "total_amount_aud", label: "Agreed Amount (AUD)", type: "number", step: "0.01" },
+      { key: "start_date", label: "Start Date", type: "date", default: todayISO() },
+      { key: "deadline", label: "Handover Deadline", type: "date" },
+      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "decimal" },
+      { key: "notes", label: "Notes", type: "textarea" },
+    ], async (data) => {
+      data.total_amount_cents = toCents(data.total_amount_aud); delete data.total_amount_aud;
+      if (!data.fee_mode) data.fee_mode = clientDefaultFeeMode(data.client_id);
+      const res = await api("/api/create-job", "POST", data);
+      toast("Job created: " + res.project_name);
+      showNewJobForm = false; selectedOrderId = res.order_id; render();
+    }, null, { submitLabel: "Create Job", onCancel: () => { showNewJobForm = false; renderCurrentTabOnly(); } }));
+  }
+
   root.appendChild(filterBar("orders", {
     placeholder: "Search by project, client…",
     statusOptions: [{ value: "in_progress", label: "In Progress" }, { value: "completed", label: "Completed" }],
@@ -633,7 +703,7 @@ function renderOrders(root) {
   card.className = "card";
   card.innerHTML = "<h2>Jobs</h2>";
   if (cache.orders.length === 0) {
-    card.innerHTML += "<div class='empty'>No jobs yet — approve a Quote to create one.</div>";
+    card.innerHTML += "<div class='empty'>No jobs yet — approve a Quote, or click \"+ New Job\" above.</div>";
     root.appendChild(card);
     return;
   }
@@ -683,7 +753,7 @@ function renderOrders(root) {
       { key: "total_amount_aud", label: "Quoted Amount (AUD)", type: "number", step:"0.01", default: fromCents(order.total_amount_cents) },
       { key: "start_date", label: "Start Date", type: "date", default: order.start_date },
       { key: "deadline", label: "Handover Deadline", type: "date", default: order.deadline },
-      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "number", step:"0.25", default: order.estimated_hours },
+      { key: "estimated_hours", label: "Estimated Hours (used for bad-debt calculation)", type: "decimal", default: order.estimated_hours },
       { key: "rate_estimated", label: "Estimated Exchange Rate (AUD/VND)", type: "number", step:"0.01", default: order.rate_estimated },
       { key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: order.status },
       { key: "notes", label: "Notes", type: "textarea", default: order.notes },
@@ -715,7 +785,7 @@ function renderOrders(root) {
         <div class="money" style="font-size:16px;font-weight:600;${overBudget?'color:var(--danger);':''}">${aud(usedTotal)} (${pct}%)</div></div>
     </div>
     ${overBudget ? "<div class='badge danger'>⚠️ Exceeds the quoted amount!</div>" : ""}
-    ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Notes from quote:</b> ${order.notes}</div>` : ""}`;
+    ${order.notes ? `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:13.5px;"><b>Notes:</b> ${order.notes}</div>` : ""}`;
   root.appendChild(budgetCard);
 
   if (order.contract_type === "fixed") renderFixedOrderDetail(root, order);
@@ -725,7 +795,7 @@ function renderOrders(root) {
 function renderFixedOrderDetail(root, order) {
   // Phần 1: Trả lương cố định theo từng nhân viên (dùng để tính thù lao)
   root.appendChild(formCard("Add Staff & Fixed Pay", [
-    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true },
+    staffSelectField(),
     { key: "fixed_amount_aud", label: "Fixed Pay (AUD)", type: "number", step:"0.01", required: true },
     { key: "delivered_date", label: "Delivery Date", type: "date" },
   ], async (data) => {
@@ -748,7 +818,7 @@ function renderFixedOrderDetail(root, order) {
     const tbody = document.createElement("tbody");
     list.forEach(x => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${staffName(x.staff_id)}</td><td class="money">${aud(x.fixed_amount_cents)}</td>
+      tr.innerHTML = `<td>${staffShort(x.staff_id)}</td><td class="money">${aud(x.fixed_amount_cents)}</td>
         <td>${fmtDate(x.delivered_date)}</td>
         <td>${x.completed ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
         <td>${x.completed ? "—" : `<button class="ghost" data-done="${x.id}">Mark Complete</button>`}</td>`;
@@ -785,17 +855,21 @@ function renderTaskTrackerSection(root, order, opts) {
     : null;
 
   const fields = [
-    { key: "task_name", label: "Task Name", type: "text", required: true, default: editingTask?.task_name },
-    { key: "staff_id", label: "Staff Member", type: "select", options: cache.staff.map(s=>s.staff_id), labels: Object.fromEntries(cache.staff.map(s=>[s.staff_id,s.full_name])), required: true, default: editingTask?.staff_id },
+    // Ô tên task kéo dài hết chiều ngang, nhiều dòng — ghi được mô tả công việc dài
+    { key: "task_name", label: "Task Name / Description", type: "textarea", rows: 2, required: true, default: editingTask?.task_name },
+    staffSelectField(editingTask?.staff_id),
+    // Khung thời gian làm (tham khảo) — không ảnh hưởng tiền, tiền vẫn tính theo Hours Worked
+    { key: "work_start", label: "Time Frame — Start (reference)", type: "datetime", default: editingTask?.work_start },
+    { key: "work_end", label: "Time Frame — End (reference)", type: "datetime", default: editingTask?.work_end },
   ];
   if (showRates) {
     fields.push(
-      { key: "hours", label: "Hours Worked", type: "number", step:"0.25", default: editingTask?.hours },
+      { key: "hours", label: "Hours Worked (decimal, e.g. 7.5)", type: "decimal", default: editingTask?.hours },
       { key: "client_rate_aud", label: "Client Bill Rate /hr (AUD)", type: "number", step:"0.01", default: editingTask ? fromCents(editingTask.client_rate_cents) : undefined },
       { key: "staff_rate_aud", label: "Staff Pay Rate /hr (AUD)", type: "number", step:"0.01", default: editingTask ? fromCents(editingTask.staff_rate_cents) : undefined },
     );
   } else {
-    fields.push({ key: "hours", label: "Hours Worked (reference only — not used for billing)", type: "number", step:"0.25", default: editingTask?.hours });
+    fields.push({ key: "hours", label: "Hours Worked (decimal, reference only — not used for billing)", type: "decimal", default: editingTask?.hours });
   }
   if (editingTask) {
     fields.push({ key: "status", label: "Status", type: "select", options: ["in_progress","completed"], labels:{in_progress:"In Progress",completed:"Completed"}, default: editingTask.status });
@@ -806,6 +880,13 @@ function renderTaskTrackerSection(root, order, opts) {
   }
 
   root.appendChild(formCard(editingTask ? "Edit Task: " + editingTask.task_name : "Add New Task", fields, async (data) => {
+    if (data.work_start && data.work_end && data.work_end < data.work_start) {
+      toast("Time Frame End must be after Start.", true); return;
+    }
+    if (editingTask) { // cho phép xóa trắng khung thời gian khi sửa
+      if (data.work_start === undefined) data.work_start = "";
+      if (data.work_end === undefined) data.work_end = "";
+    }
     if (showRates) {
       data.client_rate_cents = toCents(data.client_rate_aud); delete data.client_rate_aud;
       data.staff_rate_cents = toCents(data.staff_rate_aud); delete data.staff_rate_aud;
@@ -823,7 +904,8 @@ function renderTaskTrackerSection(root, order, opts) {
     }
   }, null, editingTask ? { editing: true, submitLabel: "Update", onCancel: () => { editingRecord = null; render(); } } : undefined));
 
-  const tasks = cache.tasks.filter(t => t.order_id === order.order_id);
+  // Sắp xếp theo thứ tự tạo (cũ -> mới) để Số thứ tự ổn định: task #1 luôn là task tạo đầu tiên
+  const tasks = cache.tasks.filter(t => t.order_id === order.order_id).sort((a, b) => a.task_id - b.task_id);
   const taskCard = document.createElement("div");
   taskCard.className = "card";
   taskCard.innerHTML = "<h2>Project Task List</h2>";
@@ -832,14 +914,15 @@ function renderTaskTrackerSection(root, order, opts) {
   } else {
     const tbl = document.createElement("table");
     const rateHeaders = showRates ? "<th>Client Amount</th><th>Staff Amount</th>" : "";
-    tbl.innerHTML = `<thead><tr><th>Task</th><th>Staff</th><th>Hours</th>${rateHeaders}<th>Status</th>${showRates?"<th>Progress Claim</th>":""}<th></th></tr></thead>`;
+    tbl.innerHTML = `<thead><tr><th>No.</th><th style="min-width:240px;">Task</th><th>Staff</th><th>Time Frame</th><th>Hours</th>${rateHeaders}<th>Status</th>${showRates?"<th>Progress Claim</th>":""}<th></th></tr></thead>`;
     const tbody = document.createElement("tbody");
-    tasks.forEach(t => {
+    tasks.forEach((t, idx) => {
       const tr = document.createElement("tr");
       const rateCells = showRates ? `<td class="money">${aud(Math.round((t.hours||0)*t.client_rate_cents))}</td><td class="money">${aud(Math.round((t.hours||0)*t.staff_rate_cents))}</td>` : "";
       const cycleCell = showRates ? `<td>${t.billing_cycle_id ? "<span class='badge muted'>Claimed #"+t.billing_cycle_id+"</span>" : "—"}</td>` : "";
       const completeBtn = t.status !== "completed" ? `<button class="ghost" data-donetask="${t.task_id}">Mark Complete</button>` : "";
-      tr.innerHTML = `<td>${t.task_name}</td><td>${staffName(t.staff_id)}</td><td>${t.hours ?? "—"}</td>${rateCells}
+      tr.innerHTML = `<td>${idx + 1}</td><td style="white-space:pre-line;">${t.task_name}</td><td>${staffShort(t.staff_id)}</td>
+        <td style="font-size:12.5px;">${fmtTimeFrame(t.work_start, t.work_end)}</td><td class="money">${fmtHours(t.hours)}</td>${rateCells}
         <td>${t.status === "completed" ? "<span class='badge ok'>Completed</span>" : "<span class='badge muted'>In Progress</span>"}</td>
         ${cycleCell}
         <td class="actions-cell">${completeBtn}<button class="ghost" data-edittask="${t.task_id}">Edit</button></td>`;
@@ -855,7 +938,10 @@ function renderTaskTrackerSection(root, order, opts) {
       }
       if (editId) { editingRecord = { table: "tasks", id: parseInt(editId) }; render(); }
     });
-    taskCard.appendChild(tbl);
+    const scroller = document.createElement("div"); // bảng nhiều cột -> cuộn ngang trên màn hình hẹp
+    scroller.style.overflowX = "auto";
+    scroller.appendChild(tbl);
+    taskCard.appendChild(scroller);
   }
   root.appendChild(taskCard);
 }
@@ -1079,14 +1165,17 @@ async function buildInvoiceDoc(invoiceId) {
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(0);
   d.line_items.forEach((li, idx) => {
-    const name = String(li.task_name || "-");
+    // Tên task dài tự xuống dòng (không còn bị cắt "..."), sang trang mới nếu hết chỗ
+    const lines = doc.splitTextToSize(String(li.task_name || "-"), colHour - colDesc - 18);
+    if (y + lines.length * 4.5 > 280) { doc.addPage(); y = 20; }
     doc.text(String(idx + 1), colNo, y);
-    doc.text(name.length > 45 ? name.slice(0, 42) + "..." : name, colDesc, y);
-    doc.text(li.hours !== null && li.hours !== undefined ? String(li.hours) : "-", colHour, y, { align: "right" });
+    doc.text(lines, colDesc, y);
+    doc.text(li.hours !== null && li.hours !== undefined ? fmtHours(li.hours) : "-", colHour, y, { align: "right" });
     doc.text(li.rate_cents !== null && li.rate_cents !== undefined ? "$" + (li.rate_cents/100).toFixed(2) : "-", colPrice, y, { align: "right" });
     doc.text("$" + (li.amount_cents/100).toFixed(2), colAmount, y, { align: "right" });
-    y += 6.5;
+    y += 6.5 + (lines.length - 1) * 4.5;
   });
+  if (y > 200) { doc.addPage(); y = 20; } // chừa chỗ cho Tổng tiền + Thông tin ngân hàng
 
   // Phí chuyển đổi (chỉ hiện nếu > 0, theo đúng logic Khách hàng chịu phí)
   if (inv.transfer_fee_cents > 0) {
@@ -1197,7 +1286,7 @@ function exportExcelReport() {
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(clientsRows), "Clients");
 
   const staffRows = cache.staff.map(s => ({
-    Name: s.full_name, Position: s.role,
+    Name: s.full_name, Nickname: s.nickname || "", Position: s.role,
     "Avg Rate (AUD/hr)": money(s.avg_hourly_rate_cents),
     "Mgmt Fee %": s.management_fee_rate_pct ?? s.management_fee_rate,
     "Start Date": xDate(s.start_date), "End Date": xDate(s.end_date),
@@ -1205,7 +1294,7 @@ function exportExcelReport() {
   }));
   XLSX.utils.book_append_sheet(wb, sheetOrPlaceholder(staffRows), "Staff");
 
-  const quotesRows = cache.quotations.map(q => ({
+  const quotesRows = cache.quotations.filter(q => !q.is_direct).map(q => ({
     Project: q.project_name, Client: clientName(q.client_id),
     "Created Date": xDate(q.created_date), "Valid Until": xDate(q.valid_until),
     Type: q.contract_type === "fixed" ? "Fixed Price" : "Hourly",
@@ -1241,6 +1330,8 @@ function exportExcelReport() {
 
   const tasksRows = cache.tasks.map(t => ({
     Job: orderLabel(t.order_id), Task: t.task_name, Staff: staffName(t.staff_id),
+    "Time Frame Start": t.work_start ? fmtDateTime(t.work_start) : "",
+    "Time Frame End": t.work_end ? fmtDateTime(t.work_end) : "",
     Hours: t.hours ?? "",
     "Client Rate (AUD/hr)": t.client_rate_cents ? money(t.client_rate_cents) : "",
     "Staff Rate (AUD/hr)": t.staff_rate_cents ? money(t.staff_rate_cents) : "",
@@ -1475,9 +1566,14 @@ function formCard(title, fields, onSubmit, extraCheckboxes, options) {
     if (f.type === "select") {
       const opts = f.options.map(o => `<option value="${o}" ${String(f.default)===String(o)?"selected":""}>${(f.labels && f.labels[o]) || o}</option>`).join("");
       inputHtml = `<select name="${f.key}" ${f.required?"required":""}>${opts}</select>`;
+    } else if (f.type === "decimal") {
+      // Số thập phân: gõ được cả 7.5 lẫn 7,5 (tự đổi dấu phẩy thành dấu chấm khi lưu)
+      inputHtml = `<input type="text" inputmode="decimal" name="${f.key}" placeholder="e.g. 7.5" ${f.required?"required":""} value="${f.default!==undefined && f.default!==null && f.default!=="" ? fmtHours(f.default) : ""}">`;
+    } else if (f.type === "datetime") {
+      inputHtml = `<input type="text" data-datetime name="${f.key}" placeholder="dd/mm/yyyy hh:mm" ${f.required?"required":""} value="${f.default||""}">`;
     } else if (f.type === "textarea") {
       wrap.style.gridColumn = "1 / -1";
-      inputHtml = `<textarea name="${f.key}" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;resize:vertical;" ${f.required?"required":""}>${f.default!==undefined && f.default!==null?f.default:""}</textarea>`;
+      inputHtml = `<textarea name="${f.key}" rows="${f.rows || 3}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:14px;font-family:inherit;resize:vertical;" ${f.required?"required":""}>${f.default!==undefined && f.default!==null?f.default:""}</textarea>`;
     } else {
       inputHtml = `<input type="${f.type}" name="${f.key}" ${f.step?`step="${f.step}"`:""} ${f.min!==undefined?`min="${f.min}"`:""} ${f.max!==undefined?`max="${f.max}"`:""} ${f.required?"required":""} value="${f.default!==undefined && f.default!==null?f.default:""}">`;
     }
@@ -1511,6 +1607,13 @@ function formCard(title, fields, onSubmit, extraCheckboxes, options) {
     const data = {};
     fields.forEach(f => { const v = fd.get(f.key); if (v !== null && v !== "") data[f.key] = v; });
     if (extraCheckboxes) extraCheckboxes.forEach(cb => { data[cb.key] = fd.get(cb.key) ? 1 : 0; });
+    for (const f of fields) {
+      if (f.type === "decimal" && data[f.key] !== undefined) {
+        const n = Number(String(data[f.key]).trim().replace(",", "."));
+        if (isNaN(n) || n < 0) { toast(`"${f.label}" must be a decimal number, e.g. 7.5`, true); return; }
+        data[f.key] = Math.round(n * 100) / 100;
+      }
+    }
     try { await onSubmit(data); if (!options.editing) form.reset(); }
     catch (err) { toast(err.message, true); }
   });
