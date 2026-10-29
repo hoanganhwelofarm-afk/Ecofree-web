@@ -18,6 +18,56 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
 }
 
+// D1 không chấp nhận giá trị undefined -> đổi thành null trước khi ghi
+function nz(v) { return v === undefined ? null : v; }
+
+// Mã nội bộ (không hiển thị trên giao diện) — tự sinh khi tạo mới nếu chưa có
+const CODE_FIELDS = {
+  clients: ["client_code", "CL"],
+  staff: ["staff_code", "STF"],
+  quotations: ["quotation_code", "Q"],
+  orders: ["order_code", "JOB"],
+};
+function genCode(prefix) {
+  return prefix + "-" + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 1000);
+}
+
+// ------------------------------------------------------------
+// TỰ ĐỘNG BỔ SUNG CỘT CÒN THIẾU (an toàn, KHÔNG xóa dữ liệu)
+// Database tạo từ schema cũ sẽ thiếu các cột mới -> lỗi "has no column named ...".
+// Đoạn này chạy 1 lần mỗi khi Worker khởi động: kiểm tra từng bảng, cột nào thiếu thì thêm vào.
+// ------------------------------------------------------------
+const MIGRATIONS = {
+  clients: {
+    address: "TEXT", accountant_email: "TEXT", service_type: "TEXT DEFAULT 'full'",
+    client_status: "TEXT DEFAULT 'active'", payment_terms_days: "INTEGER DEFAULT 30",
+    default_fee_mode: "TEXT DEFAULT 'client'",
+  },
+  staff: { management_fee_rate_pct: "REAL", start_date: "TEXT", end_date: "TEXT" },
+  quotations: { fee_mode: "TEXT", notes: "TEXT" },
+  orders: { project_name: "TEXT", fee_mode: "TEXT", total_amount_cents: "INTEGER NOT NULL DEFAULT 0", notes: "TEXT" },
+};
+let schemaReady = null;
+function ensureSchema(env) {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      for (const [table, cols] of Object.entries(MIGRATIONS)) {
+        const { results } = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+        const existing = new Set(results.map((r) => r.name));
+        for (const [col, type] of Object.entries(cols)) {
+          if (!existing.has(col)) await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`).run();
+        }
+      }
+      // Đơn hàng cũ chưa có tên dự án -> lấy từ báo giá gốc
+      await env.DB.prepare(
+        `UPDATE orders SET project_name = (SELECT q.project_name FROM quotations q WHERE q.quotation_id = orders.quotation_id)
+         WHERE project_name IS NULL OR project_name = ''`
+      ).run();
+    })().catch((e) => { schemaReady = null; throw e; });
+  }
+  return schemaReady;
+}
+
 // Đọc chế độ phí chuyển đổi: ưu tiên cột mới fee_mode ('client'|'ecofree'|'none'),
 // tự rơi về cột cũ fee_payer nếu bản ghi tạo trước khi có tính năng "Không có phí".
 function feeMode(order) {
@@ -35,6 +85,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) {
       try {
+        await ensureSchema(env);
         return await handleApi(request, env, url);
       } catch (e) {
         return json({ error: "Lỗi máy chủ: " + e.message }, 500);
@@ -79,6 +130,11 @@ async function listOrGet(request, env, table, cfg, url) {
 
 async function createRecord(request, env, table, cfg) {
   const body = await request.json();
+  if (CODE_FIELDS[table] && !body[CODE_FIELDS[table][0]]) body[CODE_FIELDS[table][0]] = genCode(CODE_FIELDS[table][1]);
+  // Cột cũ management_fee_rate (bắt buộc, chỉ nhận 20/30) — tự điền theo % mới để không lỗi NOT NULL
+  if (table === "staff" && body.management_fee_rate === undefined) {
+    body.management_fee_rate = parseFloat(body.management_fee_rate_pct) >= 25 ? 30 : 20;
+  }
   const cols = cfg.columns.filter((c) => body[c] !== undefined);
   if (cols.length === 0) return json({ error: "Không có dữ liệu hợp lệ để tạo" }, 400);
   const placeholders = cols.map(() => "?").join(",");
@@ -107,18 +163,19 @@ async function deleteRecord(request, env, table, cfg, url) {
 }
 
 async function approveQuotation(request, env) {
-  const { quotation_id, order_code } = await request.json();
+  const { quotation_id, start_date } = await request.json();
   if (!quotation_id) return json({ error: "Thiếu quotation_id" }, 400);
-  if (!order_code) return json({ error: "Thiếu order_code (Mã đơn hàng)" }, 400);
   const q = await env.DB.prepare("SELECT * FROM quotations WHERE quotation_id = ?").bind(quotation_id).first();
   if (!q) return json({ error: "Không tìm thấy báo giá" }, 404);
   if (q.status === "approved") return json({ error: "Báo giá này đã được duyệt trước đó" }, 400);
+  const order_code = genCode("JOB"); // mã nội bộ, không hiển thị
   const res = await env.DB.prepare(
     `INSERT INTO orders (order_code, quotation_id, client_id, project_name, contract_type, fee_payer, fee_mode, start_date, rate_estimated, total_amount_cents, notes, status)
-     VALUES (?, ?, ?, ?, ?, ?, ?, date('now'), 1, ?, ?, 'in_progress')`
-  ).bind(order_code, q.quotation_id, q.client_id, q.project_name, q.contract_type, q.fee_payer, q.fee_mode, q.total_amount_cents, q.notes).run();
+     VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, date('now')), 1, ?, ?, 'in_progress')`
+  ).bind(order_code, q.quotation_id, q.client_id, nz(q.project_name), q.contract_type, nz(q.fee_payer), nz(q.fee_mode),
+         nz(start_date), q.total_amount_cents ?? 0, nz(q.notes)).run();
   await env.DB.prepare("UPDATE quotations SET status = 'approved' WHERE quotation_id = ?").bind(quotation_id).run();
-  return json({ success: true, order_id: res.meta.last_row_id, order_code });
+  return json({ success: true, order_id: res.meta.last_row_id, project_name: q.project_name });
 }
 
 async function closeBillingCycle(request, env) {
@@ -266,7 +323,7 @@ async function getReport(request, env, url) {
   ).bind(from, to).first();
 
   const badDebt = await env.DB.prepare(
-    `SELECT p.payout_id, p.net_amount_cents, p.order_id, s.full_name AS staff_name, o.order_code, c.company_name
+    `SELECT p.payout_id, p.net_amount_cents, p.order_id, s.full_name AS staff_name, o.project_name, c.company_name
      FROM payouts p
      JOIN staff s ON s.staff_id = p.staff_id
      JOIN orders o ON o.order_id = p.order_id
